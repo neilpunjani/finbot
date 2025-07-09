@@ -14,19 +14,48 @@ class RouterAgent:
         self.data_sources = {
             "sql": {
                 "description": "SQL Database - Contains structured data in tables, good for complex queries, joins, aggregations",
-                "keywords": ["database", "sql", "table", "join", "select", "count", "sum", "average", "records", "rows"]
+                "keywords": ["database", "sql", "table", "join", "select", "records", "rows"],
+                "entities": [],
+                "metrics": [],
+                "time_periods": []
             },
             "excel": {
-                "description": "Excel Files - Contains spreadsheet data with multiple worksheets, good for financial data, reports",
-                "keywords": ["excel", "spreadsheet", "worksheet", "workbook", "cell", "formula", "pivot", "chart", "xlsx"]
+                "description": "Excel Files - Financial data with worksheets including VW_PBI, Trial Balance, Accounts Receivable, Debt Schedule, COA",
+                "keywords": ["excel", "spreadsheet", "worksheet", "workbook", "cell", "formula", "pivot", "chart", "xlsx", 
+                           "trial balance", "accounts receivable", "debt schedule", "vw_pbi", "coa", "chart of accounts",
+                           "financial", "accounting", "balance sheet", "income statement", "profit and loss", "revenue", "amount"],
+                "entities": ["Canada", "Alberta", "Ontario", "Quebec", "British Columbia", "Nova Scotia", "Holding Company"],
+                "metrics": ["revenue", "amount", "balance", "debt", "receivables", "assets", "liabilities"],
+                "time_periods": ["2022", "2023", "2024", "yearly", "monthly", "quarterly"]
             },
             "csv": {
-                "description": "CSV Files - Contains comma-separated tabular data, good for simple data analysis, customer data",
-                "keywords": ["csv", "comma separated", "data file", "text file", "delimiter", "tabular", "customer", "customers", "sales data", "customer data", "sales", "revenue", "transactions"]
+                "description": "CSV Files - Mining operations data including ESG, Production, Operational, and Workforce metrics",
+                "keywords": ["csv", "comma separated", "data file", "text file", "delimiter", "tabular",
+                           "esg", "environmental", "social", "governance", "ghg", "emissions", "co2", "water", "energy",
+                           "production", "operational", "workforce", "mining", "ore", "metal", "commodity", "grade",
+                           "recovery", "equipment", "utilization", "downtime", "tonnes", "headcount", "training hours",
+                           "site", "pit", "gold", "copper", "zinc", "trifr", "ltifr", "contractor", "training",
+                           "produced", "production", "output", "generated"],
+                "entities": ["Canada", "Alberta", "Ontario", "Quebec", "British Columbia", "Nova Scotia", "Holding Company"],
+                "metrics": ["training hours", "headcount", "ghg emissions", "water use", "energy", "equipment utilization", 
+                           "downtime", "tonnes moved", "ore processed", "grade", "recovery rate", "metal produced", "trifr", "ltifr"],
+                "time_periods": ["2022", "2023", "2024", "daily", "monthly", "yearly"],
+                "sites": ["North Pit", "South Pit", "Mill A", "Mill B"],
+                "commodities": ["Gold", "Copper", "Zinc", "Nickel"],
+                "natural_language_patterns": [
+                    "gold produced", "copper produced", "zinc produced", "nickel produced",
+                    "gold production", "copper production", "zinc production", "nickel production",
+                    "how much gold", "how much copper", "how much zinc", "how much nickel",
+                    "gold recovery", "copper recovery", "zinc recovery", "nickel recovery",
+                    "gold grade", "copper grade", "zinc grade", "nickel grade"
+                ]
             },
             "email": {
                 "description": "Outlook Emails - Contains email messages, good for communication analysis, finding correspondence",
-                "keywords": ["email", "emails", "inbox", "message", "outlook", "mail", "sender", "recipient", "subject", "attachment"]
+                "keywords": ["email", "emails", "inbox", "message", "outlook", "mail", "sender", "recipient", "subject", "attachment"],
+                "entities": [],
+                "metrics": [],
+                "time_periods": []
             }
         }
     
@@ -56,24 +85,70 @@ class RouterAgent:
             return "mixed"
     
     def determine_data_source(self, query: str) -> Dict[str, Any]:
-        """Determine which data source should handle the query"""
+        """Determine which data source should handle the query using comprehensive pattern matching"""
         
-        # Score each data source based on keyword matching
+        # Score each data source based on multiple factors
         scores = {}
         query_lower = query.lower()
         
         for source, info in self.data_sources.items():
             score = 0
-            matched_keywords = []
+            matched_elements = {
+                "keywords": [],
+                "entities": [],
+                "metrics": [],
+                "time_periods": [],
+                "sites": [],
+                "commodities": []
+            }
             
+            # Score keywords
             for keyword in info["keywords"]:
-                if keyword in query_lower:
+                import re
+                if re.search(r'\b' + re.escape(keyword) + r'\b', query_lower):
+                    keyword_score = len(keyword.split()) * 2 if len(keyword.split()) > 1 else 1
+                    score += keyword_score
+                    matched_elements["keywords"].append(keyword)
+            
+            # Score entities
+            for entity in info.get("entities", []):
+                if entity.lower() in query_lower:
+                    score += 2
+                    matched_elements["entities"].append(entity)
+            
+            # Score metrics
+            for metric in info.get("metrics", []):
+                if metric.lower() in query_lower:
+                    score += 3  # Metrics are highly specific
+                    matched_elements["metrics"].append(metric)
+            
+            # Score time periods
+            for period in info.get("time_periods", []):
+                if period.lower() in query_lower:
                     score += 1
-                    matched_keywords.append(keyword)
+                    matched_elements["time_periods"].append(period)
+            
+            # Score sites (CSV specific)
+            for site in info.get("sites", []):
+                if site.lower() in query_lower:
+                    score += 2
+                    matched_elements["sites"].append(site)
+            
+            # Score commodities (CSV specific)
+            for commodity in info.get("commodities", []):
+                if commodity.lower() in query_lower:
+                    score += 2
+                    matched_elements["commodities"].append(commodity)
+            
+            # Score natural language patterns (CSV specific)
+            for pattern in info.get("natural_language_patterns", []):
+                if pattern.lower() in query_lower:
+                    score += 4  # Higher score for natural language patterns
+                    matched_elements["keywords"].append(pattern)
             
             scores[source] = {
                 "score": score,
-                "matched_keywords": matched_keywords
+                "matched_elements": matched_elements
             }
         
         # Find the best matching source
@@ -87,11 +162,20 @@ class RouterAgent:
         best_sources = [source for source, info in scores.items() if info["score"] == max_score]
         primary_source = best_sources[0]
         
+        # Create detailed reasoning
+        matched = scores[primary_source]["matched_elements"]
+        reasoning_parts = []
+        for element_type, elements in matched.items():
+            if elements:
+                reasoning_parts.append(f"{element_type}: {elements}")
+        
+        reasoning = "; ".join(reasoning_parts) if reasoning_parts else "No specific matches found"
+        
         return {
             "primary_source": primary_source,
             "alternative_sources": best_sources[1:] if len(best_sources) > 1 else [],
-            "confidence": "high" if max_score >= 2 else "medium",
-            "reasoning": f"Matched keywords: {scores[primary_source]['matched_keywords']}"
+            "confidence": "high" if max_score >= 5 else "medium" if max_score >= 3 else "low",
+            "reasoning": reasoning
         }
     
     def _llm_route_decision(self, query: str) -> Dict[str, Any]:

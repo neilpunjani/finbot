@@ -16,7 +16,7 @@ class CSVAgent:
         
         # Load multiple CSV files
         self.csv_files = {}
-        self.agents = {}
+        self.agents = {}  # Lazy-loaded agents
         self._load_csv_files()
         
     def _load_csv_files(self):
@@ -69,20 +69,27 @@ class CSVAgent:
                 'filename': filename
             }
             
-            # Create individual agent for each CSV
-            self.agents[name] = create_pandas_dataframe_agent(
-                llm=self.llm,
-                df=df,
-                agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-                verbose=False,
-                handle_parsing_errors=True,
-                allow_dangerous_code=True
-            )
+            # Don't create agents yet - lazy load them when needed
             
             loaded_files.append(f"{name}: {file_path}")
             
         except Exception as e:
             print(f"Warning: Could not load CSV file {file_path}: {e}")
+    
+    def _get_or_create_agent(self, csv_name: str):
+        """Lazily create and return agent for the specified CSV"""
+        if csv_name not in self.agents:
+            if csv_name in self.csv_files:
+                df = self.csv_files[csv_name]['dataframe']
+                self.agents[csv_name] = create_pandas_dataframe_agent(
+                    llm=self.llm,
+                    df=df,
+                    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                    verbose=False,
+                    handle_parsing_errors=True,
+                    allow_dangerous_code=True
+                )
+        return self.agents.get(csv_name)
     
     def _determine_relevant_csv(self, query: str) -> str:
         """Determine which CSV file is most relevant for the query using intelligent scoring"""
@@ -108,6 +115,34 @@ class CSVAgent:
                 for word in column_lower.split('_'):
                     if word in query_lower:
                         score += 1
+            
+            # Enhanced scoring for production-related queries
+            if any(keyword in query_lower for keyword in ['produced', 'production', 'metal', 'recovery', 'grade', 'ore']):
+                if 'production' in csv_name.lower():
+                    score += 10  # Strong preference for production data
+                elif any(col in csv_info['columns'] for col in ['MetalProduced', 'RecoveryRate', 'Grade', 'OreProcessed']):
+                    score += 5
+            
+            # Enhanced scoring for operational queries
+            if any(keyword in query_lower for keyword in ['equipment', 'utilization', 'downtime', 'tonnes']):
+                if 'operational' in csv_name.lower():
+                    score += 10
+                elif any(col in csv_info['columns'] for col in ['EquipmentUtilization', 'DowntimeHours', 'TonnesMoved']):
+                    score += 5
+            
+            # Enhanced scoring for workforce queries
+            if any(keyword in query_lower for keyword in ['training', 'headcount', 'workforce', 'contractor']):
+                if 'workforce' in csv_name.lower():
+                    score += 10
+                elif any(col in csv_info['columns'] for col in ['TrainingHours', 'Headcount', 'ContractorRatio']):
+                    score += 5
+            
+            # Enhanced scoring for environmental queries
+            if any(keyword in query_lower for keyword in ['ghg', 'emissions', 'water', 'energy', 'environmental']):
+                if 'esg' in csv_name.lower():
+                    score += 10
+                elif any(col in csv_info['columns'] for col in ['GHGEmissions_tCO2e', 'WaterUse_m3', 'Energy_kWh']):
+                    score += 5
             
             # Score based on data content similarity
             if 'customer' in query_lower:
@@ -205,16 +240,424 @@ class CSVAgent:
             # Determine which CSV to use
             relevant_csv = self._determine_relevant_csv(question)
             
+            # Check if this is a specific query pattern we can handle directly
+            direct_result = self._try_direct_calculation(question, relevant_csv)
+            if direct_result:
+                return f"[{relevant_csv.title()} CSV Analysis]\n{direct_result}"
+            
             # Use the pandas agent for intelligent query handling
-            if relevant_csv in self.agents:
-                agent = self.agents[relevant_csv]
-                result = agent.run(question)
-                return f"[{relevant_csv.title()} CSV Analysis]\n{result}"
+            agent = self._get_or_create_agent(relevant_csv)
+            if agent:
+                # Add data context to help the agent understand the data structure
+                enhanced_question = self._enhance_question_with_context(question, relevant_csv)
+                result = agent.invoke({"input": enhanced_question})
+                return f"[{relevant_csv.title()} CSV Analysis]\n{result['output']}"
             else:
                 return "No suitable CSV file found for this query."
                 
         except Exception as e:
             return f"Error querying CSV files: {str(e)}"
+    
+    def _try_direct_calculation(self, question: str, csv_name: str) -> str:
+        """Try to handle query patterns with direct calculations using comprehensive preprocessing"""
+        if csv_name not in self.csv_files:
+            return None
+            
+        try:
+            question_lower = question.lower()
+            df = self.csv_files[csv_name]['dataframe'].copy()
+            
+            # Comprehensive preprocessing for all CSV files
+            df = self._preprocess_dataframe(df)
+            
+            # Parse the query to extract components
+            query_components = self._parse_query_components(question_lower)
+            
+            # Apply filters based on query components
+            filtered_df = self._apply_query_filters(df, query_components)
+            
+            # Calculate the requested metric
+            result = self._calculate_metric(filtered_df, query_components, csv_name)
+            
+            return result
+            
+        except Exception as e:
+            # If direct calculation fails, return None to fall back to pandas agent
+            return None
+    
+    def _preprocess_dataframe(self, df):
+        """Comprehensive preprocessing for all CSV dataframes"""
+        df = df.copy()
+        
+        # Date processing
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df['Year'] = df['Date'].dt.year
+            df['Month'] = df['Date'].dt.month
+            df['Quarter'] = df['Date'].dt.quarter
+        
+        # Standardize text columns
+        text_columns = ['Entity', 'Site', 'Commodity', 'Scenario']
+        for col in text_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+        
+        # Create computed columns for common queries
+        if 'GHGEmissions_tCO2e' in df.columns:
+            df['GHG_Emissions'] = df['GHGEmissions_tCO2e']
+        
+        if 'WaterUse_m3' in df.columns:
+            df['Water_Use'] = df['WaterUse_m3']
+        
+        if 'Energy_kWh' in df.columns:
+            df['Energy'] = df['Energy_kWh']
+        
+        return df
+    
+    def _parse_query_components(self, question_lower):
+        """Parse query to extract entities, metrics, time periods, etc."""
+        components = {
+            'entities': [],
+            'sites': [],
+            'commodities': [],
+            'scenarios': [],
+            'years': [],
+            'metrics': [],
+            'aggregations': []
+        }
+        
+        # Extract entities
+        entities = ['nova scotia', 'alberta', 'ontario', 'quebec', 'british columbia', 'canada', 'holding company']
+        for entity in entities:
+            if entity in question_lower:
+                components['entities'].append(entity.title())
+        
+        # Extract sites with flexible matching
+        site_mappings = {
+            'north pit': ['north pit', 'north site', 'north'],
+            'south pit': ['south pit', 'south site', 'south'],
+            'mill a': ['mill a', 'mill 1', 'first mill'],
+            'mill b': ['mill b', 'mill 2', 'second mill']
+        }
+        
+        for canonical_site, variations in site_mappings.items():
+            for variation in variations:
+                if variation in question_lower:
+                    components['sites'].append(canonical_site.title())
+                    break
+        
+        # Extract commodities
+        commodities = ['gold', 'copper', 'zinc', 'nickel']
+        for commodity in commodities:
+            if commodity in question_lower:
+                components['commodities'].append(commodity.title())
+        
+        # Extract scenarios
+        scenarios = ['actual', 'budget']
+        for scenario in scenarios:
+            if scenario in question_lower:
+                components['scenarios'].append(scenario.title())
+        
+        # Extract years
+        import re
+        years = re.findall(r'\b(202[0-9])\b', question_lower)
+        components['years'] = [int(year) for year in years]
+        
+        # SMART METRIC INTERPRETATION - This is the key enhancement!
+        # Parse the query intelligently to infer what metric is actually being requested
+        components['metrics'] = self._smart_metric_interpretation(question_lower, components)
+        
+        # Extract aggregation type
+        if any(word in question_lower for word in ['total', 'sum']):
+            components['aggregations'].append('sum')
+        elif any(word in question_lower for word in ['average', 'mean']):
+            components['aggregations'].append('mean')
+        elif any(word in question_lower for word in ['maximum', 'max']):
+            components['aggregations'].append('max')
+        elif any(word in question_lower for word in ['minimum', 'min']):
+            components['aggregations'].append('min')
+        else:
+            components['aggregations'].append('sum')  # default
+        
+        # Extract decimal place requirements
+        decimal_patterns = [
+            r'(\d+)\s*decimal\s*place',
+            r'(\d+)\s*decimal',
+            r'(\d+)\s*dp',
+            r'to\s*(\d+)\s*decimal'
+        ]
+        
+        components['decimal_places'] = None
+        for pattern in decimal_patterns:
+            match = re.search(pattern, question_lower)
+            if match:
+                components['decimal_places'] = int(match.group(1))
+                break
+        
+        return components
+    
+    def _smart_metric_interpretation(self, question_lower, components):
+        """Intelligently interpret what metric the user is actually asking for"""
+        import re
+        
+        # Define smart patterns that map natural language to actual metrics
+        smart_patterns = {
+            # Pattern: (regex_pattern, target_metric, required_commodity_context)
+            
+            # PRODUCTION METRICS  
+            (r'\b(?:total|sum|amount of|how much|quantity of)?\s*(?:gold|copper|zinc|nickel)\s+(?:produced|production|output|generated)', 'MetalProduced', True),
+            (r'\b(?:how much|amount of|quantity of)\s+(?:gold|copper|zinc|nickel)\s+(?:was|were|is|are)?\s*(?:produced|generated)', 'MetalProduced', True),
+            (r'\b(?:gold|copper|zinc|nickel)\s+(?:produced|production|output)', 'MetalProduced', True),
+            (r'\b(?:total|sum|amount of)?\s*(?:metal|metals)\s+(?:produced|production|output)', 'MetalProduced', False),
+            (r'\b(?:total|sum|amount of)?\s*(?:ore|material)\s+(?:processed|processing|handled)', 'OreProcessed', False),
+            (r'\b(?:total|sum|amount of)?\s*(?:tonnes|tons)\s+(?:moved|transported|handled)', 'TonnesMoved', False),
+            
+            # RECOVERY AND GRADE METRICS  
+            (r'\b(?:recovery|recovery rate|extraction rate)\s+(?:of|for)?\s*(?:gold|copper|zinc|nickel)', 'RecoveryRate', True),
+            (r'\b(?:grade|ore grade|metal grade)\s+(?:of|for)?\s*(?:gold|copper|zinc|nickel)', 'Grade', True),
+            (r'\b(?:average|mean)?\s*(?:recovery|recovery rate)', 'RecoveryRate', False),
+            (r'\b(?:average|mean)?\s*(?:grade|ore grade)', 'Grade', False),
+            (r'\b(?:gold|copper|zinc|nickel)\s+(?:recovery|recovery rate)', 'RecoveryRate', True),
+            (r'\b(?:gold|copper|zinc|nickel)\s+(?:grade|ore grade)', 'Grade', True),
+            
+            # OPERATIONAL METRICS
+            (r'\b(?:equipment|machinery)\s+(?:utilization|usage|efficiency)', 'EquipmentUtilization', False),
+            (r'\b(?:downtime|down time)\s+(?:hours|time)', 'DowntimeHours', False),
+            (r'\b(?:utilization|usage)\s+(?:rate|percentage)', 'EquipmentUtilization', False),
+            
+            # WORKFORCE METRICS
+            (r'\b(?:training|train)\s+(?:hours|time)', 'TrainingHours', False),
+            (r'\b(?:headcount|head count|workforce|employees|staff)', 'Headcount', False),
+            (r'\b(?:contractor|contractors)\s+(?:ratio|percentage)', 'ContractorRatio', False),
+            
+            # SAFETY METRICS
+            (r'\btrifr\b', 'TRIFR', False),
+            (r'\bltifr\b', 'LTIFR', False),
+            (r'\b(?:total recordable injury frequency|total recordable injury)', 'TRIFR', False),
+            (r'\b(?:lost time injury frequency|lost time injury)', 'LTIFR', False),
+            
+            # ENVIRONMENTAL METRICS
+            (r'\b(?:ghg|greenhouse gas|carbon)\s+(?:emissions|emission)', 'GHG_Emissions', False),
+            (r'\b(?:emissions|emission)\b', 'GHG_Emissions', False),
+            (r'\b(?:water|h2o)\s+(?:use|usage|consumption)', 'Water_Use', False),
+            (r'\b(?:energy|power)\s+(?:use|usage|consumption)', 'Energy', False),
+        }
+        
+        detected_metrics = []
+        
+        # Check each smart pattern
+        for pattern, metric, requires_commodity in smart_patterns:
+            if re.search(pattern, question_lower):
+                # If the pattern requires commodity context, check if commodity is mentioned
+                if requires_commodity and components['commodities']:
+                    detected_metrics.append(metric)
+                elif not requires_commodity:
+                    detected_metrics.append(metric)
+        
+        # If no smart patterns matched, fall back to traditional keyword matching
+        if not detected_metrics:
+            detected_metrics = self._traditional_metric_matching(question_lower)
+        
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(detected_metrics))
+    
+    def _traditional_metric_matching(self, question_lower):
+        """Traditional keyword-based metric matching as fallback"""
+        metric_mappings = {
+            'training hours': 'TrainingHours',
+            'headcount': 'Headcount',
+            'contractor ratio': 'ContractorRatio',
+            'ghg emissions': 'GHG_Emissions',
+            'emissions': 'GHG_Emissions',
+            'water use': 'Water_Use',
+            'energy': 'Energy',
+            'equipment utilization': 'EquipmentUtilization',
+            'downtime hours': 'DowntimeHours',
+            'tonnes moved': 'TonnesMoved',
+            'ore processed': 'OreProcessed',
+            'grade': 'Grade',
+            'recovery rate': 'RecoveryRate',
+            'metal produced': 'MetalProduced',
+            'trifr': 'TRIFR',
+            'ltifr': 'LTIFR'
+        }
+        
+        detected_metrics = []
+        for metric_phrase, column_name in metric_mappings.items():
+            if metric_phrase in question_lower:
+                detected_metrics.append(column_name)
+        
+        return detected_metrics
+    
+    def _apply_query_filters(self, df, components):
+        """Apply filters based on parsed query components"""
+        filtered_df = df.copy()
+        
+        # Filter by entities
+        if components['entities']:
+            filtered_df = filtered_df[filtered_df['Entity'].isin(components['entities'])]
+        
+        # Filter by sites
+        if components['sites'] and 'Site' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Site'].isin(components['sites'])]
+        
+        # Filter by commodities
+        if components['commodities'] and 'Commodity' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Commodity'].isin(components['commodities'])]
+        
+        # Filter by scenarios
+        if components['scenarios'] and 'Scenario' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Scenario'].isin(components['scenarios'])]
+        
+        # Filter by years
+        if components['years'] and 'Year' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Year'].isin(components['years'])]
+        
+        return filtered_df
+    
+    def _calculate_metric(self, filtered_df, components, csv_name):
+        """Calculate the requested metric from filtered data"""
+        if filtered_df.empty:
+            return f"No data found matching the specified criteria."
+        
+        if not components['metrics']:
+            return f"Found {len(filtered_df)} records matching the criteria."
+        
+        results = []
+        for metric in components['metrics']:
+            if metric not in filtered_df.columns:
+                continue
+            
+            # Get aggregation type
+            agg_type = components['aggregations'][0] if components['aggregations'] else 'sum'
+            
+            # Calculate the metric
+            if agg_type == 'sum':
+                value = filtered_df[metric].sum()
+            elif agg_type == 'mean':
+                value = filtered_df[metric].mean()
+            elif agg_type == 'max':
+                value = filtered_df[metric].max()
+            elif agg_type == 'min':
+                value = filtered_df[metric].min()
+            else:
+                value = filtered_df[metric].sum()
+            
+            # Determine decimal places for formatting
+            decimal_places = components.get('decimal_places')
+            
+            # Format the result with appropriate decimal places
+            if decimal_places is not None:
+                # Use the specified decimal places
+                formatted_value = f"{value:.{decimal_places}f}"
+            else:
+                # Use default formatting based on metric type
+                if metric == 'TrainingHours':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'Headcount':
+                    formatted_value = f"{value:.1f}"
+                elif metric in ['GHG_Emissions', 'GHGEmissions_tCO2e']:
+                    formatted_value = f"{value:.1f}"
+                elif metric in ['Water_Use', 'WaterUse_m3']:
+                    formatted_value = f"{value:.1f}"
+                elif metric in ['Energy', 'Energy_kWh']:
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'EquipmentUtilization':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'DowntimeHours':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'TonnesMoved':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'OreProcessed':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'Grade':
+                    formatted_value = f"{value:.4f}"
+                elif metric == 'RecoveryRate':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'MetalProduced':
+                    formatted_value = f"{value:.1f}"
+                elif metric == 'TRIFR':
+                    formatted_value = f"{value:.2f}"
+                elif metric == 'LTIFR':
+                    formatted_value = f"{value:.2f}"
+                else:
+                    formatted_value = f"{value:.2f}"
+            
+            # Create the result string with proper units
+            if metric == 'TrainingHours':
+                results.append(f"{agg_type.title()} training hours: {formatted_value}")
+            elif metric == 'Headcount':
+                results.append(f"{agg_type.title()} headcount: {formatted_value}")
+            elif metric in ['GHG_Emissions', 'GHGEmissions_tCO2e']:
+                results.append(f"{agg_type.title()} GHG emissions: {formatted_value} tCO2e")
+            elif metric in ['Water_Use', 'WaterUse_m3']:
+                results.append(f"{agg_type.title()} water use: {formatted_value} m3")
+            elif metric in ['Energy', 'Energy_kWh']:
+                results.append(f"{agg_type.title()} energy use: {formatted_value} kWh")
+            elif metric == 'EquipmentUtilization':
+                results.append(f"{agg_type.title()} equipment utilization: {formatted_value}%")
+            elif metric == 'DowntimeHours':
+                results.append(f"{agg_type.title()} downtime hours: {formatted_value}")
+            elif metric == 'TonnesMoved':
+                results.append(f"{agg_type.title()} tonnes moved: {formatted_value}")
+            elif metric == 'OreProcessed':
+                results.append(f"{agg_type.title()} ore processed: {formatted_value}")
+            elif metric == 'Grade':
+                results.append(f"{agg_type.title()} grade: {formatted_value}")
+            elif metric == 'RecoveryRate':
+                results.append(f"{agg_type.title()} recovery rate: {formatted_value}%")
+            elif metric == 'MetalProduced':
+                results.append(f"{agg_type.title()} metal produced: {formatted_value}")
+            elif metric == 'TRIFR':
+                results.append(f"{agg_type.title()} TRIFR: {formatted_value}")
+            elif metric == 'LTIFR':
+                results.append(f"{agg_type.title()} LTIFR: {formatted_value}")
+            else:
+                results.append(f"{agg_type.title()} {metric}: {formatted_value}")
+        
+        # Add context about filters applied
+        context = []
+        if components['entities']:
+            context.append(f"Entity: {', '.join(components['entities'])}")
+        if components['sites']:
+            context.append(f"Site: {', '.join(components['sites'])}")
+        if components['commodities']:
+            context.append(f"Commodity: {', '.join(components['commodities'])}")
+        if components['years']:
+            context.append(f"Year: {', '.join(map(str, components['years']))}")
+        if components['scenarios']:
+            context.append(f"Scenario: {', '.join(components['scenarios'])}")
+        
+        result_text = "\\n".join(results)
+        if context:
+            result_text += f"\\n\\nFilters applied: {'; '.join(context)}"
+        
+        return result_text
+    
+    def _enhance_question_with_context(self, question: str, csv_name: str) -> str:
+        """Add helpful context about the data structure to improve pandas agent performance"""
+        csv_info = self.csv_files[csv_name]
+        columns = csv_info['columns']
+        
+        context_hints = []
+        
+        # Add hints for date handling
+        if 'Date' in columns and any(word in question.lower() for word in ['2023', '2024', '2022', 'year']):
+            context_hints.append("Note: To work with years, first convert the Date column to datetime using pd.to_datetime(df['Date']) and then extract year with df['Date'].dt.year")
+        
+        # Add hints for entity filtering
+        if 'Entity' in columns and any(entity in question.lower() for entity in ['nova scotia', 'alberta', 'ontario', 'quebec', 'canada']):
+            context_hints.append("Note: Entity values are exact strings like 'Nova Scotia', 'Alberta', etc.")
+        
+        # Add hints for common aggregations
+        if any(word in question.lower() for word in ['total', 'sum', 'average', 'mean']):
+            context_hints.append("Note: Use appropriate pandas aggregation functions like sum(), mean(), etc.")
+        
+        if context_hints:
+            enhanced = f"{question}\n\nContext hints:\n" + "\n".join(context_hints)
+            return enhanced
+        
+        return question
     
     def _direct_csv_analysis(self, question: str, csv_name: str) -> str:
         """Perform direct analysis on CSV data without using pandas agent"""
