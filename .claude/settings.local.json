@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python test:*)"
+      "Bash(python test:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(source:*)",
+      "Bash(./venv/Scripts/python.exe test_excel_fix.py:*)",
+      "Bash(./venv/Scripts/python.exe simple_test.py:*)",
+      "Bash(grep:*)",
+      "Bash(./venv/Scripts/python.exe direct_test.py)",
+      "Bash(cat:*)",
+      "Bash(./venv/Scripts/python.exe test_main.py:*)",
+      "Bash(rm:*)",
+      "Bash(./venv/Scripts/python.exe main.py)",
+      "Bash(./venv/Scripts/python.exe test_final.py:*)",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(xxd:*)",
+      "Bash(true)",
+      "Bash(venv/Scripts/python.exe -c \"\nimport sys\nsys.path.append(''.'')\nfrom src.agents.csv_agent import CSVAgent\nimport os\nos.environ[''CSV_DIRECTORY''] = ''data/csv''\ntry:\n    agent = CSVAgent()\n    print(''CSV Agent initialized successfully!'')\n    print(agent.get_data_info())\nexcept Exception as e:\n    print(f''Error: {e}'')\n    import traceback\n    traceback.print_exc()\")"
     ],
     "deny": []
   }

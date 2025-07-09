@@ -1,7 +1,26 @@
-from dotenv import load_dotenv
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import sys
+import os
+
+# Set UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    try:
+        # Try to set console to UTF-8
+        os.system("chcp 65001 > nul")
+        # Reconfigure stdout to use UTF-8 encoding
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except:
+        # If that fails, try alternative approach
+        import locale
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+
+from dotenv import load_dotenv, find_dotenv
 from src.agents.langgraph_workflow import ChatbotWorkflow
 
-load_dotenv()
+# Force reload environment variables to avoid caching issues
+load_dotenv(find_dotenv(), override=True, verbose=False)
 
 def main():
     print("Initializing Finaptive AI Chatbot...")
