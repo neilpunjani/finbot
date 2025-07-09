@@ -1,0 +1,25 @@
+Customer_ID,Name,Email,Phone,City,State,Country,Age,Registration_Date,Customer_Type
+C001,John Smith,john.smith@email.com,555-0101,New York,NY,USA,35,2023-01-15,Premium
+C002,Jane Doe,jane.doe@email.com,555-0102,Los Angeles,CA,USA,28,2023-02-20,Standard
+C003,Bob Johnson,bob.johnson@email.com,555-0103,Chicago,IL,USA,42,2023-03-10,Premium
+C004,Alice Brown,alice.brown@email.com,555-0104,Houston,TX,USA,31,2023-04-05,Standard
+C005,Charlie Davis,charlie.davis@email.com,555-0105,Phoenix,AZ,USA,39,2023-05-12,Premium
+C006,Diana Wilson,diana.wilson@email.com,555-0106,Philadelphia,PA,USA,26,2023-06-18,Standard
+C007,Frank Miller,frank.miller@email.com,555-0107,San Antonio,TX,USA,45,2023-07-22,Premium
+C008,Grace Taylor,grace.taylor@email.com,555-0108,San Diego,CA,USA,33,2023-08-30,Standard
+C009,Henry Anderson,henry.anderson@email.com,555-0109,Dallas,TX,USA,37,2023-09-15,Premium
+C010,Ivy Thomas,ivy.thomas@email.com,555-0110,San Jose,CA,USA,29,2023-10-08,Standard
+C011,Jack Jackson,jack.jackson@email.com,555-0111,Austin,TX,USA,41,2023-11-12,Premium
+C012,Karen White,karen.white@email.com,555-0112,Jacksonville,FL,USA,34,2023-12-03,Standard
+C013,Leo Harris,leo.harris@email.com,555-0113,Fort Worth,TX,USA,38,2024-01-07,Premium
+C014,Mia Martin,mia.martin@email.com,555-0114,Columbus,OH,USA,27,2024-01-20,Standard
+C015,Noah Thompson,noah.thompson@email.com,555-0115,Charlotte,NC,USA,36,2024-02-01,Premium
+C016,Olivia Garcia,olivia.garcia@email.com,555-0116,San Francisco,CA,USA,32,2024-02-15,Standard
+C017,Paul Rodriguez,paul.rodriguez@email.com,555-0117,Indianapolis,IN,USA,40,2024-03-01,Premium
+C018,Quinn Lewis,quinn.lewis@email.com,555-0118,Seattle,WA,USA,30,2024-03-10,Standard
+C019,Ruby Lee,ruby.lee@email.com,555-0119,Denver,CO,USA,43,2024-03-25,Premium
+C020,Sam Walker,sam.walker@email.com,555-0120,Washington,DC,USA,35,2024-04-08,Standard
+C021,Tina Hall,tina.hall@email.com,555-0121,Boston,MA,USA,29,2024-04-20,Premium
+C022,Uma Allen,uma.allen@email.com,555-0122,El Paso,TX,USA,37,2024-05-05,Standard
+C023,Victor Young,victor.young@email.com,555-0123,Nashville,TN,USA,44,2024-05-18,Premium
+C024,Wendy King,wendy.king@email.com,555-0124,Detroit,MI,USA,31,2024-06-01,Standard
