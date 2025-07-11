@@ -21,7 +21,9 @@
       "Bash(venv/Scripts/python.exe -c \"\nimport sys\nsys.path.append(''.'')\nfrom src.agents.csv_agent import CSVAgent\nimport os\nos.environ[''CSV_DIRECTORY''] = ''data/csv''\ntry:\n    agent = CSVAgent()\n    print(''CSV Agent initialized successfully!'')\n    print(agent.get_data_info())\nexcept Exception as e:\n    print(f''Error: {e}'')\n    import traceback\n    traceback.print_exc()\")",
       "Bash(venv/Scripts/python.exe:*)",
       "Bash(rg:*)",
-      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c \"\nfrom src.agents.langgraph_workflow import ChatbotWorkflow\nchatbot = ChatbotWorkflow()\nquery = ''average recovery rate for gold for south pit in 2023. answer in 2 decimal place''\nresult = chatbot.process_query(query)\nprint(''Query:'', query)\nprint(''Result (first 500 chars):'', repr(result[:500]))\n\")"
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c \"\nfrom src.agents.langgraph_workflow import ChatbotWorkflow\nchatbot = ChatbotWorkflow()\nquery = ''average recovery rate for gold for south pit in 2023. answer in 2 decimal place''\nresult = chatbot.process_query(query)\nprint(''Query:'', query)\nprint(''Result (first 500 chars):'', repr(result[:500]))\n\")",
+      "Bash(mkdir:*)",
+      "Bash(pip install:*)"
     ],
     "deny": []
   }
