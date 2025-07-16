@@ -22,7 +22,7 @@ const Chatbot = () => {
         timestamp: new Date()
       }
     ]);
-  }, []);
+  }, [fetchSystemStatus]);
 
   useEffect(() => {
     scrollToBottom();
@@ -32,14 +32,14 @@ const Chatbot = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const fetchSystemStatus = async () => {
+  const fetchSystemStatus = React.useCallback(async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/status`);
       setSystemStatus(response.data);
     } catch (error) {
       console.error('Failed to fetch system status:', error);
     }
-  };
+  }, [API_BASE_URL]);
 
   const sendMessage = async (e) => {
     e.preventDefault();
