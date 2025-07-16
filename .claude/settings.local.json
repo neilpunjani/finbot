@@ -23,7 +23,9 @@
       "Bash(rg:*)",
       "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c \"\nfrom src.agents.langgraph_workflow import ChatbotWorkflow\nchatbot = ChatbotWorkflow()\nquery = ''average recovery rate for gold for south pit in 2023. answer in 2 decimal place''\nresult = chatbot.process_query(query)\nprint(''Query:'', query)\nprint(''Result (first 500 chars):'', repr(result[:500]))\n\")",
       "Bash(mkdir:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(az containerapp logs show:*)",
+      "Bash(az acr build:*)"
     ],
     "deny": []
   }

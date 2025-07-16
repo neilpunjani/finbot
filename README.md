@@ -6,22 +6,43 @@ An agentic AI chatbot solution that queries multiple data sources (SQL databases
 
 1. **Install Dependencies**
    ```bash
+   # Bash/Linux/macOS
+   pip install -r requirements.txt
+   ```
+   ```powershell
+   # PowerShell/Windows
    pip install -r requirements.txt
    ```
 
 2. **Configure Environment**
    ```bash
+   # Bash/Linux/macOS
    cp .env.example .env
+   # Edit .env with your settings
+   ```
+   ```powershell
+   # PowerShell/Windows
+   Copy-Item .env.example .env
    # Edit .env with your settings
    ```
 
 3. **Test Setup**
    ```bash
+   # Bash/Linux/macOS
+   python tests/test_chatbot.py
+   ```
+   ```powershell
+   # PowerShell/Windows
    python tests/test_chatbot.py
    ```
 
 4. **Run Chatbot**
    ```bash
+   # Bash/Linux/macOS
+   python main.py
+   ```
+   ```powershell
+   # PowerShell/Windows
    python main.py
    ```
 
@@ -90,6 +111,20 @@ EXCEL_FILE_PATH=data/excel/your_file.xlsx
 Run different test suites:
 
 ```bash
+# Bash/Linux/macOS
+# Complete system test
+python tests/test_chatbot.py
+
+# Environment validation
+python scripts/debug_env.py
+
+# Specific feature tests
+python tests/test_csv_fix.py
+python tests/test_source_attribution.py
+```
+
+```powershell
+# PowerShell/Windows
 # Complete system test
 python tests/test_chatbot.py
 

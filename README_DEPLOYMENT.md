@@ -18,7 +18,7 @@ This guide covers deploying the Finaptive AI Chatbot with a React frontend and F
 ## Local Development
 
 ### 1. Start the Backend API
-```bash
+```powershell
 # Install Python dependencies
 pip install -r requirements.txt
 
@@ -28,9 +28,9 @@ python api.py
 The API will be available at `http://localhost:8000`
 
 ### 2. Start the Frontend
-```bash
+```powershell
 # Navigate to frontend directory
-cd frontend
+Set-Location frontend
 
 # Install dependencies
 npm install
@@ -44,35 +44,45 @@ The frontend will be available at `http://localhost:3000`
 
 ### 1. Deploy Backend to Azure Container Apps
 
-```bash
+```powershell
 # Login to Azure
 az login
 
 # Create resource group
-az group create --name test-bot-rg --location eastus
+az group create --name finaptive-llmbot --location eastus
 
 # Create container registry
-az acr create --resource-group test-bot-rg --name testbot --sku Basic
+az acr create --resource-group finaptive-llmbot --name finbotcr --sku Basic
+
+# Enable admin access for the registry
+az acr update --name finbotcr --admin-enabled true
 
 # Build and push Docker image
-az acr build --registry testbot --image chatbot-api:latest .
+az acr build --registry finbotcr --image chatbot-api:latest .
+
+# Get registry credentials (copy the password from output)
+az acr credential show --name finbotcr
 
 # Create Container Apps environment
-az containerapp env create \
-  --name test-bot-env \
-  --resource-group test-bot-rg \
+az containerapp env create `
+  --name finaptive-llmbot-env `
+  --resource-group finaptive-llmbot `
   --location eastus
 
-# Deploy the container app
-az containerapp create \
-  --name test-bot-api \
-  --resource-group test-bot-rg \
-  --environment test-bot-env \
-  --image testbot.azurecr.io/chatbot-api:latest \
-  --target-port 8000 \
-  --ingress 'external' \
-  --registry-server testbot.azurecr.io
+# Deploy the container app (replace YOUR_PASSWORD with password from credential show command)
+az containerapp create `
+  --name finaptive-llmbot-api `
+  --resource-group finaptive-llmbot `
+  --environment finaptive-llmbot-env `
+  --image finbotcr.azurecr.io/chatbot-api:latest `
+  --target-port 8000 `
+  --ingress 'external' `
+  --registry-server finbotcr.azurecr.io `
+  --registry-username finbotcr `
+  --registry-password YOUR_PASSWORD
 ```
+
+**Note**: Replace `YOUR_PASSWORD` with the actual password from the `az acr credential show` command output.
 
 ### 2. Deploy Frontend to Azure Static Web Apps
 
@@ -85,32 +95,122 @@ az containerapp create \
 4. Deploy
 
 #### Option B: Using Azure CLI
-```bash
+```powershell
 # Create static web app
-az staticwebapp create \
-  --name test-bot-frontend \
-  --resource-group test-bot-rg \
-  --source https://github.com/yourusername/test-bot \
-  --location eastus \
-  --branch main \
-  --app-location "/frontend" \
+az staticwebapp create `
+  --name finaptive-llmbot-frontend `
+  --resource-group finaptive-llmbot `
+  --source https://github.com/yourusername/finaptive_chatbot `
+  --location eastus `
+  --branch main `
+  --app-location "/frontend" `
   --output-location "build"
 ```
 
 ### 3. Configure Environment Variables
 
 #### Backend (Container Apps)
-```bash
+
+##### Option 1: Direct Environment Variables (Simple)
+```powershell
 # Add environment variables to container app
-az containerapp update \
-  --name test-bot-api \
-  --resource-group test-bot-rg \
-  --set-env-vars \
-    OPENAI_API_KEY=your_openai_key \
-    DATABASE_URL=your_database_url \
-    EMAIL_ADDRESS=your_email \
+az containerapp update `
+  --name finaptive-llmbot-api `
+  --resource-group finaptive-llmbot `
+  --set-env-vars `
+    OPENAI_API_KEY=your_openai_key `
+    DATABASE_URL=your_database_url `
+    EMAIL_ADDRESS=your_email `
     EMAIL_PASSWORD=your_email_password
 ```
+
+##### Option 2: Azure Key Vault (Recommended for Production)
+
+**Step 1: Create Key Vault and Add Secrets**
+```powershell
+# Create Key Vault
+az keyvault create `
+  --name finaptive-llmbot-kv `
+  --resource-group finaptive-llmbot `
+  --location eastus
+
+# Grant yourself access to Key Vault first
+$userObjectId = (az ad signed-in-user show --query id -o tsv)
+$subscriptionId = (az account show --query id -o tsv)
+
+az role assignment create `
+  --role "Key Vault Secrets Officer" `
+  --assignee $userObjectId `
+  --scope "/subscriptions/$subscriptionId/resourcegroups/finaptive-llmbot/providers/microsoft.keyvault/vaults/finaptive-llmbot-kv"
+
+# Wait 2-3 minutes for role propagation, then add secrets to Key Vault
+az keyvault secret set --vault-name finaptive-llmbot-kv --name "openai-api-key" --value "your_openai_key"
+az keyvault secret set --vault-name finaptive-llmbot-kv --name "database-url" --value "your_database_url"
+az keyvault secret set --vault-name finaptive-llmbot-kv --name "email-address" --value "your_email"
+az keyvault secret set --vault-name finaptive-llmbot-kv --name "email-password" --value "your_email_password"
+```
+
+**Step 2: Enable Managed Identity and Grant Permissions**
+```powershell
+# Enable managed identity for Container App
+az containerapp identity assign `
+  --name finaptive-llmbot-api `
+  --resource-group finaptive-llmbot `
+  --system-assigned
+
+# Get the managed identity principal ID
+$principalId = (az containerapp identity show --name finaptive-llmbot-api --resource-group finaptive-llmbot --query principalId -o tsv)
+
+# Grant Key Vault access to managed identity using RBAC
+az role assignment create `
+  --role "Key Vault Secrets User" `
+  --assignee $principalId `
+  --scope "/subscriptions/$subscriptionId/resourcegroups/finaptive-llmbot/providers/microsoft.keyvault/vaults/finaptive-llmbot-kv"
+```
+
+**Step 3: Connect Key Vault to Container App via Azure Portal**
+
+Since CLI has syntax issues, use the Azure Portal:
+
+1. **Go to Azure Portal** → Navigate to your Container App: `finaptive-llmbot-api`
+
+2. **Add Key Vault Secrets:**
+   - Go to **Settings** → **Secrets**
+   - Click **Add** for each secret:
+     
+     **Secret 1:**
+     - Key: `openai-api-key`
+     - Type: `Key Vault reference`
+     - Key Vault Secret URL: `https://finaptive-llmbot-kv.vault.azure.net/secrets/openai-api-key`
+     - Managed Identity: `System assigned`
+     
+     **Secret 2:**
+     - Key: `database-url`
+     - Type: `Key Vault reference`
+     - Key Vault Secret URL: `https://finaptive-llmbot-kv.vault.azure.net/secrets/database-url`
+     - Managed Identity: `System assigned`
+     
+     **Secret 3:**
+     - Key: `email-address`
+     - Type: `Key Vault reference`
+     - Key Vault Secret URL: `https://finaptive-llmbot-kv.vault.azure.net/secrets/email-address`
+     - Managed Identity: `System assigned`
+     
+     **Secret 4:**
+     - Key: `email-password`
+     - Type: `Key Vault reference`
+     - Key Vault Secret URL: `https://finaptive-llmbot-kv.vault.azure.net/secrets/email-password`
+     - Managed Identity: `System assigned`
+
+3. **Add Environment Variables:**
+   - Go to **Settings** → **Environment variables**
+   - Add these variables:
+     - `OPENAI_API_KEY` = `secretref:openai-api-key`
+     - `DATABASE_URL` = `secretref:database-url`
+     - `EMAIL_ADDRESS` = `secretref:email-address`
+     - `EMAIL_PASSWORD` = `secretref:email-password`
+
+4. **Save and Deploy** - The Container App will restart with Key Vault integration
 
 #### Frontend (Static Web Apps)
 1. Go to Azure Portal > Your Static Web App > Configuration
@@ -121,10 +221,11 @@ az containerapp update \
 ## Production Considerations
 
 ### Security
-- Use Azure Key Vault for sensitive environment variables
-- Enable HTTPS only
-- Configure CORS properly in production
-- Use managed identity for Azure resources
+- **Use Azure Key Vault** for sensitive environment variables (see Option 2 above)
+- **Enable HTTPS only**
+- **Configure CORS** properly in production
+- **Use managed identity** for Azure resources (eliminates need for connection strings)
+- **Rotate secrets regularly** in Key Vault
 
 ### Monitoring
 - Enable Application Insights for both frontend and backend
@@ -145,11 +246,11 @@ az containerapp update \
 4. **API connection**: Ensure backend URL is correct in frontend
 
 ### Logs
-```bash
+```powershell
 # View container app logs
-az containerapp logs show \
-  --name test-bot-api \
-  --resource-group test-bot-rg
+az containerapp logs show `
+  --name finaptive-llmbot-api `
+  --resource-group finaptive-llmbot
 ```
 
 ## Cost Optimization
