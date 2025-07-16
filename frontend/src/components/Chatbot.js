@@ -11,6 +11,19 @@ const Chatbot = () => {
 
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const fetchSystemStatus = React.useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/status`);
+      setSystemStatus(response.data);
+    } catch (error) {
+      console.error('Failed to fetch system status:', error);
+    }
+  }, [API_BASE_URL]);
+
   useEffect(() => {
     fetchSystemStatus();
     // Add welcome message
@@ -27,19 +40,6 @@ const Chatbot = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const fetchSystemStatus = React.useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/status`);
-      setSystemStatus(response.data);
-    } catch (error) {
-      console.error('Failed to fetch system status:', error);
-    }
-  }, [API_BASE_URL]);
 
   const sendMessage = async (e) => {
     e.preventDefault();
