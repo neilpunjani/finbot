@@ -17,22 +17,23 @@ if sys.platform == "win32":
         locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
 from dotenv import load_dotenv, find_dotenv
-from src.agents.langgraph_workflow import ChatbotWorkflow
+from src.agents.pure_workflow import PureAgenticWorkflow
 
 # Force reload environment variables to avoid caching issues
 load_dotenv(find_dotenv(), override=True, verbose=False)
 
 def main():
-    print("Initializing Finaptive AI Chatbot...")
+    print("Initializing Focused Two-Phase Agent System...")
     
     try:
-        workflow = ChatbotWorkflow()
-        print("✅ Chatbot initialized successfully!")
+        workflow = PureAgenticWorkflow()
         print("\n" + workflow.get_system_status())
         print("\n" + "="*60)
-        print("Finaptive AI Chatbot - Multi-Source Query System")
+        print("🎯 Focused Two-Phase Agent - Discovery → Analysis")
         print("="*60)
-        print("Ask me questions about your data sources (SQL, Excel, CSV, or Emails)")
+        print("🔍 Phase 1: Quick relevance discovery (all sheets)")
+        print("🎯 Phase 2: Focused analysis (top 2 sheets only)")
+        print("✅ No sheet bouncing, concrete answers, optimal performance") 
         print("Type 'help' for examples, 'status' for system info, or 'quit' to exit")
         print("="*60 + "\n")
         
@@ -63,11 +64,13 @@ def main():
                 print(f"Error: {str(e)}\n")
                 
     except Exception as e:
-        print(f"❌ Failed to initialize chatbot: {str(e)}")
+        print(f"❌ Failed to initialize focused two-phase agent system: {str(e)}")
         print("\nPlease check your configuration:")
         print("1. Ensure all required environment variables are set in .env file")
-        print("2. Verify data source files exist and are accessible")
-        print("3. Check network connectivity for email/database connections")
+        print("2. Verify Excel/CSV data source files exist and are accessible")
+        print("3. Check OpenAI API key is valid for GPT-4o and GPT-4o-mini")
+        print("4. Check that data files are in the correct directories")
+        print("5. Ensure proper file permissions for data access")
 
 if __name__ == "__main__":
     main()

@@ -25,7 +25,8 @@
       "Bash(mkdir:*)",
       "Bash(pip install:*)",
       "Bash(az containerapp logs show:*)",
-      "Bash(az acr build:*)"
+      "Bash(az acr build:*)",
+      "Bash(pip3 install:*)"
     ],
     "deny": []
   }

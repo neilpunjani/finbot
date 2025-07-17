@@ -22,15 +22,15 @@ if sys.platform == "win32":
         locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
 from dotenv import load_dotenv, find_dotenv
-from src.agents.langgraph_workflow import ChatbotWorkflow
+from src.agents.pure_workflow import PureAgenticWorkflow
 
 # Load environment variables
 load_dotenv(find_dotenv(), override=True, verbose=False)
 
 app = FastAPI(
-    title="Finaptive AI Chatbot API",
-    description="Multi-Source Query System API for SQL, Excel, CSV, and Email data",
-    version="1.0.0"
+    title="Finaptive Focused Two-Phase Agent API", 
+    description="Focused Discovery → Analysis Approach for Optimal Performance",
+    version="6.0.0"
 )
 
 # Configure CORS
@@ -61,36 +61,37 @@ class SystemStatus(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the chatbot workflow on startup"""
+    """Initialize the pure agentic workflow on startup"""
     global workflow
     try:
-        workflow = ChatbotWorkflow()
-        print("✅ Chatbot workflow initialized successfully!")
+        workflow = PureAgenticWorkflow()
+        print("✅ Pure Agentic AI workflow initialized successfully!")
     except Exception as e:
-        print(f"❌ Failed to initialize chatbot workflow: {str(e)}")
+        print(f"❌ Failed to initialize pure agentic workflow: {str(e)}")
         raise
 
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Finaptive AI Chatbot API",
-        "version": "1.0.0",
+        "message": "Finaptive Focused Two-Phase Agent API",
+        "version": "6.0.0", 
         "docs": "/docs",
-        "status": "/status"
+        "status": "/status",
+        "features": ["two_phase_discovery", "focused_analysis", "no_sheet_bouncing", "concrete_answers", "optimal_performance"]
     }
 
 @app.get("/status", response_model=SystemStatus)
 async def get_status():
     """Get system status and available data sources"""
     if workflow is None:
-        raise HTTPException(status_code=503, detail="Chatbot workflow not initialized")
+        raise HTTPException(status_code=503, detail="Pure agentic workflow not initialized")
     
     try:
         status_info = workflow.get_system_status()
         return SystemStatus(
             status="active",
-            available_sources=["SQL", "Excel", "CSV", "Email"],
+            available_sources=["Two-Phase Discovery", "Focused Analysis", "No Sheet Bouncing", "Concrete Answers"],
             system_info=status_info
         )
     except Exception as e:
@@ -100,7 +101,7 @@ async def get_status():
 async def chat(message: ChatMessage):
     """Process a chat message and return response"""
     if workflow is None:
-        raise HTTPException(status_code=503, detail="Chatbot workflow not initialized")
+        raise HTTPException(status_code=503, detail="Pure agentic workflow not initialized")
     
     if not message.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
