@@ -10,7 +10,7 @@ import json
 class ExcelAgent:
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-3.5-turbo", 
+            model="gpt-4o", 
             temperature=0,
             api_key=os.getenv("OPENAI_API_KEY")
         )
@@ -252,7 +252,7 @@ class ExcelAgent:
                 self.worksheet_agents[sheet_name] = create_pandas_dataframe_agent(
                     llm=self.llm,
                     df=df,
-                    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                    agent_type=AgentType.OPENAI_FUNCTIONS,
                     verbose=False,
                     handle_parsing_errors=True,
                     allow_dangerous_code=True
