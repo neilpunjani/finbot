@@ -28,9 +28,9 @@ from src.agents.pure_workflow import PureAgenticWorkflow
 load_dotenv(find_dotenv(), override=True, verbose=False)
 
 app = FastAPI(
-    title="Finaptive Focused Two-Phase Agent API", 
-    description="Focused Discovery → Analysis Approach for Optimal Performance",
-    version="6.0.0"
+    title="Finaptive Adaptive ReAct Agent with Full Dataset Loading API", 
+    description="Fixed: Full Dataset Loading + Data Quality Detection + ReAct Cross-Checking",
+    version="8.1.0"
 )
 
 # Configure CORS
@@ -74,11 +74,11 @@ async def startup_event():
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Finaptive Focused Two-Phase Agent API",
-        "version": "6.0.0", 
+        "message": "Finaptive Adaptive ReAct Agent with Full Dataset Loading API",
+        "version": "8.1.0", 
         "docs": "/docs",
         "status": "/status",
-        "features": ["two_phase_discovery", "focused_analysis", "no_sheet_bouncing", "concrete_answers", "optimal_performance"]
+        "features": ["full_dataset_loading", "data_quality_detection", "adaptive_discovery", "react_cross_checking", "calculation_transparency", "blank_data_penalties", "cached_performance"]
     }
 
 @app.get("/status", response_model=SystemStatus)
@@ -91,7 +91,7 @@ async def get_status():
         status_info = workflow.get_system_status()
         return SystemStatus(
             status="active",
-            available_sources=["Two-Phase Discovery", "Focused Analysis", "No Sheet Bouncing", "Concrete Answers"],
+            available_sources=["Adaptive Discovery", "Query Complexity Analysis", "ReAct Cross-Checking", "Multi-Sheet Validation", "Calculation Transparency", "Intelligent Selection"],
             system_info=status_info
         )
     except Exception as e:

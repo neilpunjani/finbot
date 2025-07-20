@@ -23,17 +23,19 @@ from src.agents.pure_workflow import PureAgenticWorkflow
 load_dotenv(find_dotenv(), override=True, verbose=False)
 
 def main():
-    print("Initializing Focused Two-Phase Agent System...")
+    print("Initializing Adaptive ReAct Agent with Cross-Checking...")
     
     try:
         workflow = PureAgenticWorkflow()
         print("\n" + workflow.get_system_status())
         print("\n" + "="*60)
-        print("🎯 Focused Two-Phase Agent - Discovery → Analysis")
+        print("🎯 Adaptive ReAct Agent - Discovery → Analysis → Cross-Check")
         print("="*60)
-        print("🔍 Phase 1: Quick relevance discovery (all sheets)")
-        print("🎯 Phase 2: Focused analysis (top 2 sheets only)")
-        print("✅ No sheet bouncing, concrete answers, optimal performance") 
+        print("🧠 Adaptive: Analyzes query complexity, selects optimal sheets (2-6)")
+        print("🔄 ReAct: Cross-checks results across sheets for validation")
+        print("🧮 Transparent: Shows exact calculations and verification")
+        print("✅ Quality: Full dataset loading + data quality penalties")
+        print("🎯 Fixed: No more 10-row limits, proper blank data detection") 
         print("Type 'help' for examples, 'status' for system info, or 'quit' to exit")
         print("="*60 + "\n")
         
@@ -64,13 +66,14 @@ def main():
                 print(f"Error: {str(e)}\n")
                 
     except Exception as e:
-        print(f"❌ Failed to initialize focused two-phase agent system: {str(e)}")
+        print(f"❌ Failed to initialize adaptive ReAct agent with cross-checking: {str(e)}")
         print("\nPlease check your configuration:")
         print("1. Ensure all required environment variables are set in .env file")
         print("2. Verify Excel/CSV data source files exist and are accessible")
         print("3. Check OpenAI API key is valid for GPT-4o and GPT-4o-mini")
         print("4. Check that data files are in the correct directories")
         print("5. Ensure proper file permissions for data access")
+        print("6. The adaptive ReAct features require pandas, openpyxl, and langchain")
 
 if __name__ == "__main__":
     main()
