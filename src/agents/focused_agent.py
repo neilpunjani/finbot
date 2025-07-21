@@ -6,7 +6,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from langchain.prompts import PromptTemplate
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import pandas as pd
 
@@ -20,6 +20,12 @@ class DataSourceAnalysis:
     reason: str
     file_path: Optional[str] = None
     sheet_name: Optional[str] = None
+    # Enhanced domain analysis fields
+    domain_type: str = "Unknown"  # 'Financial', 'Mining Production', 'Mining Operations', 'Mixed'
+    data_structure: str = ""  # Description of data hierarchy/structure
+    key_fields: List[str] = field(default_factory=list)  # Most important columns for analysis
+    expertise_needed: str = ""  # What kind of expert the agent should become
+    field_variations: Dict[str, List[str]] = field(default_factory=dict)  # Common abbreviations/variations for fields
 
 class DataDiscoveryAgent:
     """
@@ -278,7 +284,7 @@ Reasoning: [brief explanation of why these sources were selected]
         data_summary = self._get_data_preview(df)
         
         # Score relevance using enhanced keyword matching + LLM reasoning
-        relevance_score, reason = self._score_source_relevance(source_type, name, df, query, data_summary)
+        relevance_score, reason, domain_analysis = self._score_source_relevance(source_type, name, df, query, data_summary)
         
         return DataSourceAnalysis(
             source_type=source_type,
@@ -288,16 +294,21 @@ Reasoning: [brief explanation of why these sources were selected]
             recommended=False,  # Will be set later
             reason=reason,
             file_path=file_path,
-            sheet_name=sheet_name
+            sheet_name=sheet_name,
+            domain_type=domain_analysis.get('domain_type', 'Unknown'),
+            data_structure=domain_analysis.get('data_structure', ''),
+            key_fields=domain_analysis.get('key_fields', []),
+            expertise_needed=domain_analysis.get('expertise_needed', ''),
+            field_variations=domain_analysis.get('field_variations', {})
         )
     
-    def _score_source_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str, data_summary: str) -> Tuple[float, str]:
+    def _score_source_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str, data_summary: str) -> Tuple[float, str, Dict]:
         """Score how relevant this source is for the query using intelligent LLM analysis"""
         
         # Use LLM to intelligently analyze data structure and relevance
         return self._llm_score_data_relevance(source_type, name, df, query)
     
-    def _llm_score_data_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str]:
+    def _llm_score_data_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str, Dict]:
         """Use LLM to intelligently score data source relevance based on complete data structure analysis"""
         
         # Prepare comprehensive data structure information
@@ -391,6 +402,11 @@ Data Purpose: [Mining production/operations/financial classification]
 Best Column: [Most relevant column name]
 Match Quality: [Perfect/Strong/Moderate/Weak/Poor match explanation]
 Reasoning: [Domain-specific analysis of why this data matches the query]
+Domain Type: [Financial|Mining Production|Mining Operations|Mixed]
+Data Structure: [Description of hierarchies/organization]
+Key Fields: [Comma-separated list of most important columns]
+Expertise Needed: [What kind of expert should analyze this data]
+Field Variations: [Common abbreviations for key fields, format: field=abbrev1,abbrev2|field2=abbrev3]
 
 **DOMAIN-SPECIFIC EXAMPLES**:
 Query: "gold production 2024" → MetalProduced/GoldProduced columns = Score 9-10
@@ -415,6 +431,11 @@ NOW ANALYZE THIS MINING/FINANCIAL DATASET:
             best_column = "None"
             match_quality = "Unknown"
             reasoning = "LLM analysis failed to parse"
+            domain_type = "Unknown"
+            data_structure = ""
+            key_fields = []
+            expertise_needed = ""
+            field_variations = {}
             
             for line in lines:
                 line = line.strip()
@@ -437,6 +458,26 @@ NOW ANALYZE THIS MINING/FINANCIAL DATASET:
                     match_quality = line.split(':', 1)[1].strip()
                 elif line.startswith('Reasoning:'):
                     reasoning = line.split(':', 1)[1].strip()
+                elif line.startswith('Domain Type:'):
+                    domain_type = line.split(':', 1)[1].strip()
+                elif line.startswith('Data Structure:'):
+                    data_structure = line.split(':', 1)[1].strip()
+                elif line.startswith('Key Fields:'):
+                    key_fields_text = line.split(':', 1)[1].strip()
+                    key_fields = [field.strip() for field in key_fields_text.split(',') if field.strip()]
+                elif line.startswith('Expertise Needed:'):
+                    expertise_needed = line.split(':', 1)[1].strip()
+                elif line.startswith('Field Variations:'):
+                    variations_text = line.split(':', 1)[1].strip()
+                    try:
+                        # Parse format: field=abbrev1,abbrev2|field2=abbrev3
+                        for field_group in variations_text.split('|'):
+                            if '=' in field_group:
+                                field_name, abbrevs = field_group.split('=', 1)
+                                field_variations[field_name.strip()] = [a.strip() for a in abbrevs.split(',')]
+                    except Exception as e:
+                        print(f"         ⚠️ Field variations parsing error: {e}")
+                        field_variations = {}
             
             # If parsing failed, try to extract any useful info from the content
             if score == 0.0 and data_purpose == "Unknown":
@@ -462,21 +503,34 @@ NOW ANALYZE THIS MINING/FINANCIAL DATASET:
             # Create comprehensive reasoning
             full_reasoning = f"Purpose: {data_purpose[:50]}... | Quality: {match_quality[:30]}... | Column: {best_column}"
             
+            # Create domain analysis dictionary
+            domain_analysis = {
+                'domain_type': domain_type,
+                'data_structure': data_structure,
+                'key_fields': key_fields,
+                'expertise_needed': expertise_needed,
+                'field_variations': field_variations,
+                'data_purpose': data_purpose,
+                'best_column': best_column,
+                'match_quality': match_quality
+            }
+            
             print(f"     🤖 LLM Pattern Analysis - {name}:")
             print(f"         Score: {score:.1f}")
+            print(f"         Domain Type: {domain_type}")
             print(f"         Purpose: {data_purpose}")
             print(f"         Best Column: {best_column}")
-            print(f"         Match Quality: {match_quality}")
-            print(f"         Reasoning: {reasoning[:100]}...")
+            print(f"         Expertise: {expertise_needed}")
+            print(f"         Key Fields: {key_fields}")
             
-            return score, full_reasoning
+            return score, full_reasoning, domain_analysis
             
         except Exception as e:
             print(f"     ⚠️ LLM scoring failed for {name}: {e}")
             # Fallback to basic scoring
             return self._fallback_basic_scoring(source_type, name, df, query)
     
-    def _fallback_basic_scoring(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str]:
+    def _fallback_basic_scoring(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str, Dict]:
         """Simple fallback scoring when LLM analysis fails"""
         
         score = 0.0
@@ -495,7 +549,158 @@ NOW ANALYZE THIS MINING/FINANCIAL DATASET:
         if df.shape[0] > 100:
             score += 0.5
         
-        return score, f"Fallback scoring based on basic name/column matching"
+        # Create minimal domain analysis for fallback
+        fallback_domain_analysis = {
+            'domain_type': "Unknown",
+            'data_structure': f"Basic tabular data with {df.shape[1]} columns",
+            'key_fields': list(df.columns)[:5],
+            'expertise_needed': "General data analysis",
+            'field_variations': {},
+            'data_purpose': "General data source",
+            'best_column': df.columns[0] if len(df.columns) > 0 else "None",
+            'match_quality': "Basic fallback match"
+        }
+        
+        return score, f"Fallback scoring based on basic name/column matching", fallback_domain_analysis
+    
+    def _create_dynamic_expert_prompt(self, source_analysis: DataSourceAnalysis) -> str:
+        """Create dynamic expert prompt based on domain analysis from router"""
+        
+        domain_type = source_analysis.domain_type
+        data_structure = source_analysis.data_structure
+        expertise_needed = source_analysis.expertise_needed
+        key_fields = source_analysis.key_fields
+        
+        # Base expert identity
+        if "Financial" in domain_type:
+            expert_prompt = """
+🏦 **YOU ARE A FINANCIAL ANALYSIS EXPERT**
+
+FINANCIAL EXPERTISE:
+- **Financial Statements**: Understand P&L (Profit & Loss), Balance Sheet, Cash Flow hierarchies
+- **Key Metrics**: Revenue, COGS, Gross Profit, EBITDA, Net Income, Assets, Liabilities, Equity
+- **Financial Ratios**: ROA, ROE, Debt-to-Equity, Current Ratio, Gross/Net Margins
+- **Accounting Principles**: Recognize standard chart of accounts, general ledger structures
+- **Period Analysis**: Handle fiscal years, quarters, monthly reporting periods
+- **Currency & Amounts**: Work with monetary values, multi-currency scenarios
+
+FINANCIAL DATA STRUCTURES:
+- **Hierarchical Categories**: Level1 (BS/PnL/CF) → Level2 (line items) → Level3 (sub-categories)  
+- **Standard Abbreviations**: BS=Balance Sheet, PnL/P&L=Profit & Loss, CF=Cash Flow
+- **Common Fields**: Amount, Value, Entity, Period, Year, Scenario, Currency, Office, Measure
+
+INTELLIGENT FIELD MATCHING FOR FINANCIAL DATA:
+- **Cost of Goods Sold**: Try "COGS", "CoGS", "Cost of Sales", "Direct Costs", "Cost of Goods Sold"
+- **Revenue**: Try "Revenue", "Sales", "Income", "Gross Revenue", "Net Sales"
+- **Assets**: Try "Assets", "Total Assets", "Current Assets", "Fixed Assets"
+- **Liabilities**: Try "Liabilities", "Total Liabilities", "Current Liabilities", "Long-term Debt"
+- **Cash**: Try "Cash", "Cash and Equivalents", "Cash Position", "Liquid Assets"
+- **EBITDA**: Try "EBITDA", "Operating Income", "Earnings", "Operating Profit"
+
+FINANCIAL CALCULATIONS:
+- Apply standard financial formulas (Gross Profit = Revenue - COGS)
+- Calculate financial ratios using appropriate denominators
+- Handle negative values appropriately (losses, liabilities)
+- Understand financial statement reconciliation principles
+"""
+
+        elif "Mining Production" in domain_type:
+            expert_prompt = """
+⛏️ **YOU ARE A MINING PRODUCTION OPERATIONS EXPERT**
+
+MINING PRODUCTION EXPERTISE:
+- **Production Metrics**: Understand metal output, ore processing, extraction efficiency
+- **Commodity Knowledge**: Gold, Copper, Iron Ore, Coal, Silver, Zinc, Lead, Nickel pricing and units
+- **Production Process**: Ore extraction → Processing → Metal production → Recovery rates
+- **Units**: Tonnes, ounces (oz), grams per tonne (g/t), percentages for recovery/grade
+- **Key Performance Indicators**: Metal produced, ore processed, grade, recovery rate
+
+MINING DATA STRUCTURES:
+- **Production Hierarchy**: Site → Entity → Commodity → Processing → Output
+- **Standard Fields**: MetalProduced, OreProcessed, Grade, RecoveryRate, Commodity, Site, Entity, Date
+- **Scenarios**: Actual vs Budget vs Forecast production scenarios
+
+INTELLIGENT FIELD MATCHING FOR MINING PRODUCTION:
+- **Production Output**: Try "MetalProduced", "GoldProduced", "CopperProduced", "Output", "Produced", "Production"
+- **Ore Input**: Try "OreProcessed", "OreTreated", "MillFeed", "TotalOre", "Input"
+- **Quality Metrics**: Try "Grade", "HeadGrade", "g/t", "Quality", "Concentration"  
+- **Efficiency**: Try "RecoveryRate", "Recovery", "Extraction", "Efficiency", "%Recovery"
+- **Commodities**: Try exact names "Gold", "Copper", "Iron Ore", "Coal", plus variations
+
+MINING CALCULATIONS:
+- Calculate production rates (tonnes/day, ounces/month)
+- Compute recovery efficiency (metal out / theoretical maximum)
+- Analyze grade trends and processing performance
+- Handle commodity-specific units and conversions
+"""
+
+        elif "Mining Operations" in domain_type:
+            expert_prompt = """
+🚛 **YOU ARE A MINING OPERATIONS & LOGISTICS EXPERT**
+
+MINING OPERATIONS EXPERTISE:  
+- **Operational Metrics**: Equipment utilization, material movement, logistics efficiency
+- **Equipment Management**: Downtime tracking, maintenance schedules, utilization rates
+- **Material Handling**: Tonnage moved, haulage operations, transportation logistics
+- **Performance Tracking**: Operational efficiency, cost per tonne, productivity metrics
+- **Resource Management**: Equipment deployment, operational planning, cost optimization
+
+OPERATIONS DATA STRUCTURES:
+- **Operational Hierarchy**: Site → Equipment → Activity → Performance
+- **Standard Fields**: TonnesMoved, EquipmentUtilization, DowntimeHours, HaulageVolume, FuelConsumption
+- **Tracking Elements**: Date, Site, Equipment, Activity, Performance Metrics
+
+INTELLIGENT FIELD MATCHING FOR MINING OPERATIONS:
+- **Material Movement**: Try "TonnesMoved", "HaulageVolume", "Moved", "Transported", "Volume"
+- **Equipment Performance**: Try "EquipmentUtilization", "Utilization", "Usage", "Performance"
+- **Maintenance**: Try "DowntimeHours", "Downtime", "Maintenance", "OutOfService"
+- **Logistics**: Try "Transportation", "Haulage", "Movement", "Logistics"
+- **Efficiency**: Try "Efficiency", "Performance", "Productivity", "Rate"
+
+OPERATIONAL CALCULATIONS:
+- Calculate utilization rates (active time / total time)
+- Compute material movement rates (tonnes/hour, trips/day)
+- Analyze downtime patterns and maintenance efficiency
+- Measure cost per tonne and operational productivity
+"""
+
+        else:
+            # Generic expert prompt for unknown domains
+            expert_prompt = f"""
+🔬 **YOU ARE A DATA ANALYSIS EXPERT**
+
+GENERAL DATA ANALYSIS EXPERTISE:
+Based on the router's analysis, this appears to be: {domain_type}
+Data structure description: {data_structure}
+Expertise needed: {expertise_needed}
+
+KEY FIELDS IDENTIFIED: {key_fields}
+
+Apply your general analytical skills to:
+- Understand the data structure and relationships
+- Identify patterns and trends in the data
+- Perform accurate calculations based on the query requirements
+- Use appropriate statistical and analytical methods
+"""
+
+        # Add common intelligent matching guidance
+        expert_prompt += f"""
+
+🎯 **DOMAIN-SPECIFIC CONTEXT FOR THIS ANALYSIS**:
+- **Domain Type**: {domain_type}  
+- **Data Structure**: {data_structure}
+- **Key Fields Available**: {key_fields}
+- **Expertise Required**: {expertise_needed}
+
+**CRITICAL SUCCESS FACTORS**:
+1. **Apply Domain Knowledge**: Use your specialized expertise to interpret the query correctly
+2. **Intelligent Field Discovery**: Don't give up if exact field names don't match - try variations
+3. **Domain-Appropriate Calculations**: Use industry-standard formulas and methods
+4. **Unit Awareness**: Apply correct units and scaling based on domain conventions
+5. **Context Understanding**: Interpret results within the proper business/operational context
+"""
+
+        return expert_prompt
     
     def _get_data_preview(self, df: pd.DataFrame) -> str:
         """Generate a concise data preview for source relevance analysis"""
@@ -1327,8 +1532,13 @@ class FocusedAnalysisAgent:
         calculation_log.append(f"Data shape: {df.shape}")
         calculation_log.append(f"Available columns: {list(df.columns)}")
         
-        # Enhanced focused prompt for multi-source analysis
+        # Create dynamic expert prompt based on domain analysis
+        expertise_prompt = self._create_dynamic_expert_prompt(source_analysis)
+        
+        # Enhanced focused prompt with domain expertise
         focused_prompt = f"""
+        {expertise_prompt}
+        
         CRITICAL: You have access to a loaded pandas DataFrame called 'df' with {df.shape[0]} rows and {df.shape[1]} columns.
         This DataFrame contains data from {source_analysis.source_type}: "{source_analysis.name}".
         
@@ -1338,6 +1548,12 @@ class FocusedAnalysisAgent:
         - Data types: {dict(df.dtypes)}
         - Source: {source_analysis.source_type} - {source_analysis.name}
         
+        DOMAIN ANALYSIS:
+        - Domain Type: {source_analysis.domain_type}
+        - Data Structure: {source_analysis.data_structure}
+        - Key Fields: {source_analysis.key_fields}
+        - Field Variations Available: {list(source_analysis.field_variations.keys())}
+        
         Source selection reason: {source_analysis.reason}
         Data summary: {source_analysis.data_summary}
         
@@ -1345,21 +1561,30 @@ class FocusedAnalysisAgent:
         
         IMPORTANT: Do NOT say you don't have access to data. You DO have access to the DataFrame 'df'.
         
+        INTELLIGENT FIELD MATCHING:
+        If you cannot find a field directly, try these intelligent approaches:
+        1. **Abbreviations**: Try common abbreviations from field_variations: {source_analysis.field_variations}
+        2. **Case variations**: Try different capitalizations (e.g., COGS, CoGS, Cogs, cogs)
+        3. **Synonyms**: Try related terms based on your domain expertise
+        4. **Partial matching**: Look for columns containing the key terms
+        5. **Data type analysis**: Check if the query asks for financial amounts, quantities, percentages, etc.
+        
         CALCULATION TRANSPARENCY INSTRUCTIONS:
         1. SHOW YOUR WORK: Explain every step of your calculation
-        2. SHOW PANDAS CODE: Show the exact pandas code you're running
+        2. SHOW PANDAS CODE: Show the exact pandas code you're running  
         3. SHOW DATA FILTERS: Show exactly what data you're filtering/selecting
         4. SHOW ROW COUNTS: Show how many rows match your filters
         5. VERIFY YOUR LOGIC: Double-check your approach and calculations
-        
-        Analyze this data source based on its actual structure and content to provide the most accurate analysis possible.
+        6. SHOW FIELD MATCHING: If using abbreviations/variations, explain which ones you tried
         
         REQUIRED OUTPUT FORMAT:
-        1. Data exploration: What columns and data structure you found
-        2. Filtering logic: Exactly what filters you applied and why
-        3. Row verification: How many rows match your filters
-        4. Calculation steps: Step-by-step calculation with actual values
-        5. Final answer: The result with proper units/context
+        1. Expert domain analysis: Apply your specialized knowledge to understand the query
+        2. Intelligent field discovery: Show how you found the right columns (including variations tried)
+        3. Data exploration: What columns and data structure you found
+        4. Filtering logic: Exactly what filters you applied and why
+        5. Row verification: How many rows match your filters
+        6. Calculation steps: Step-by-step calculation with actual values using domain expertise
+        7. Final answer: The result with proper units/context and domain insights
         """
         
         agent = create_pandas_dataframe_agent(
