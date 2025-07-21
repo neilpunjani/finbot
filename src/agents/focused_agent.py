@@ -318,87 +318,158 @@ Reasoning: [brief explanation of why these sources were selected]
                 else:
                     categorical_samples[col] = list(unique_vals[:10]) + [f"... and {len(unique_vals)-10} more"]
             
-            # Create intelligent analysis prompt
+            # Create domain-specific mining and financial data analysis prompt
             analysis_prompt = f"""
-You are a data source relevance analyst. Your task is to analyze a dataset and score its relevance for answering a specific user query.
+You are an expert mining operations and financial data analyst. This system contains data from mining companies with production, operational, and financial information. Analyze this dataset to determine how well it can answer the user's query.
 
 **USER QUERY**: "{query}"
 
-**DATASET INFORMATION**:
-- Source Type: {source_type.upper()}
-- Name: {name}
-- Shape: {df.shape[0]} rows × {df.shape[1]} columns
-
-**COMPLETE DATA STRUCTURE**:
-
-**Column Names & Types**:
-{dict(df.dtypes)}
-
-**Sample Data (first 3 rows)**:
+**DATASET**: {name}
+**COLUMNS**: {list(df.columns)}
+**SAMPLE DATA**:
 {sample_rows}
 
-**Categorical Column Values**:
-{categorical_samples}
+**MINING & FINANCIAL DATA DOMAIN KNOWLEDGE**:
 
-**Numeric Columns**:
-{numeric_cols}
+**MINING PRODUCTION DATA** (Highest value for production queries):
+- MetalProduced, GoldProduced, CopperProduced = Final metal output (tonnes/ounces)
+- OreProcessed, OreTreated = Raw material input (tonnes)
+- Grade = Metal concentration in ore (g/t, %)
+- RecoveryRate = Extraction efficiency (%)
+- MillThroughput = Processing capacity utilization
 
-**ANALYSIS INSTRUCTIONS**:
+**MINING OPERATIONAL DATA** (For efficiency/logistics queries):
+- TonnesMoved, HaulageVolume = Material transportation
+- EquipmentUtilization = Machine efficiency (%)
+- DowntimeHours = Equipment maintenance time
+- FuelConsumption = Operating costs indicator
+- BlastingOperations = Mine development activities
 
-1. **UNDERSTAND THE DATASET**: Based on the column names, data types, and sample values, determine what this dataset represents (e.g., production data, financial data, operational metrics, etc.)
+**FINANCIAL DATA** (For revenue/cost/profitability queries):
+- Amount, Value, Revenue = Monetary values ($)
+- Cost, Expense, OPEX, CAPEX = Expenditure categories
+- Commodity pricing = Metal sale prices
+- Level1/Level2/Level3 = Financial statement hierarchies (BS/PnL/CF)
+- EBITDA, NetIncome = Profitability metrics
 
-2. **IDENTIFY KEY METRICS**: Which columns contain the metrics that would be most relevant for answering the user's query?
+**QUERY TYPE ANALYSIS**:
+1. **PRODUCTION QUERIES** ("production", "output", "generated", "extracted"):
+   - Priority: MetalProduced > OreProcessed > TonnesMoved
+   - Look for: Actual output quantities, not logistics
 
-3. **ASSESS QUERY ALIGNMENT**: How well does this dataset align with what the user is asking for? Consider:
-   - Does it contain the right type of data?
-   - Are the key metrics present?
-   - Can it answer the specific question asked?
-   - Does it have the right dimensions (time periods, entities, categories)?
+2. **FINANCIAL QUERIES** ("revenue", "sales", "profit", "cost", "financial"):
+   - Priority: Amount/Revenue > operational metrics
+   - Look for: Dollar values, financial statements
 
-4. **SCORE RELEVANCE**: Provide a relevance score from 0-10 where:
-   - 0-2: Completely irrelevant, cannot answer the query
-   - 3-4: Somewhat related but missing key information
-   - 5-6: Moderately relevant, has some useful data
-   - 7-8: Highly relevant, contains most needed information
-   - 9-10: Perfect match, ideal dataset for this query
+3. **OPERATIONAL EFFICIENCY** ("efficiency", "utilization", "performance"):
+   - Priority: RecoveryRate, EquipmentUtilization > raw output
+   - Look for: Percentage/ratio metrics
 
-**OUTPUT FORMAT**:
-Score: [0-10]
-Reasoning: [2-3 sentences explaining your analysis and why you gave this score]
+4. **LOGISTICS QUERIES** ("moved", "transported", "hauled"):
+   - Priority: TonnesMoved, HaulageVolume > MetalProduced
+   - Look for: Movement/transportation data
 
-**EXAMPLE**:
-Score: 9
-Reasoning: This dataset contains production metrics with MetalProduced column showing actual output quantities. It has Commodity field to filter for Gold and Scenario field to compare Actual vs Budget, directly matching the user's query about gold production comparisons.
+**CRITICAL DISTINCTIONS IN MINING**:
+- MetalProduced (final product) ≠ TonnesMoved (logistics)
+- OreProcessed (input) ≠ MetalProduced (output)  
+- Amount (financial $) ≠ Quantity (physical units)
+- Grade (quality) ≠ RecoveryRate (efficiency)
+- Production (output focus) ≠ Operations (process focus)
 
-Now analyze this dataset:
+**COMMODITY TYPES**: Gold, Copper, Iron Ore, Coal, Silver, Zinc, Lead, Nickel
+
+**SCORING CRITERIA** (0-10 scale):
+- **9-10**: Perfect domain match - exact mining/financial metric requested
+- **7-8**: Strong match - correct data type with minor conceptual gap
+- **5-6**: Moderate match - related mining/financial data but different focus
+- **3-4**: Weak match - same industry but wrong metric type
+- **0-2**: Poor match - unrelated to query intent
+
+**REQUIRED OUTPUT FORMAT** (Follow EXACTLY):
+Score: X
+Data Purpose: [Mining production/operations/financial classification]
+Best Column: [Most relevant column name]
+Match Quality: [Perfect/Strong/Moderate/Weak/Poor match explanation]
+Reasoning: [Domain-specific analysis of why this data matches the query]
+
+**DOMAIN-SPECIFIC EXAMPLES**:
+Query: "gold production 2024" → MetalProduced/GoldProduced columns = Score 9-10
+Query: "tonnes moved" → TonnesMoved columns = Score 9-10  
+Query: "revenue breakdown" → Amount with financial Level1/2/3 = Score 9-10
+Query: "equipment efficiency" → EquipmentUtilization/RecoveryRate = Score 8-9
+
+NOW ANALYZE THIS MINING/FINANCIAL DATASET:
 """
 
             # Get LLM analysis
             response = self.llm.invoke([HumanMessage(content=analysis_prompt)])
             
-            # Parse the response
+            # Parse the enhanced response
             content = response.content.strip()
+            print(f"     🔍 DEBUG - LLM Raw Response for {name}:")
+            print(f"         {content}")
             lines = content.split('\n')
             
             score = 0.0
+            data_purpose = "Unknown"
+            best_column = "None"
+            match_quality = "Unknown"
             reasoning = "LLM analysis failed to parse"
             
             for line in lines:
+                line = line.strip()
                 if line.startswith('Score:'):
                     try:
                         score_text = line.split(':', 1)[1].strip()
-                        score = float(score_text)
-                    except:
+                        # Extract just the number
+                        import re
+                        numbers = re.findall(r'\d+\.?\d*', score_text)
+                        if numbers:
+                            score = float(numbers[0])
+                    except Exception as e:
+                        print(f"         ⚠️ Score parsing error: {e}")
                         score = 0.0
+                elif line.startswith('Data Purpose:'):
+                    data_purpose = line.split(':', 1)[1].strip()
+                elif line.startswith('Best Column:'):
+                    best_column = line.split(':', 1)[1].strip()
+                elif line.startswith('Match Quality:'):
+                    match_quality = line.split(':', 1)[1].strip()
                 elif line.startswith('Reasoning:'):
                     reasoning = line.split(':', 1)[1].strip()
+            
+            # If parsing failed, try to extract any useful info from the content
+            if score == 0.0 and data_purpose == "Unknown":
+                print(f"         ⚠️ Parsing failed, trying fallback extraction...")
+                # Try to find score in any format
+                import re
+                score_matches = re.findall(r'(?:score|rating).*?(\d+(?:\.\d+)?)', content.lower())
+                if score_matches:
+                    score = float(score_matches[0])
+                    print(f"         ✓ Extracted score: {score}")
+                
+                # Try to find purpose/meaning
+                if 'production' in content.lower():
+                    data_purpose = "Production/output data"
+                elif 'financial' in content.lower() or 'money' in content.lower():
+                    data_purpose = "Financial data"
+                elif 'operational' in content.lower():
+                    data_purpose = "Operational data"
             
             # Ensure score is within valid range
             score = max(0.0, min(10.0, score))
             
-            print(f"     🤖 LLM Analysis - {name}: Score {score:.1f} - {reasoning[:100]}...")
+            # Create comprehensive reasoning
+            full_reasoning = f"Purpose: {data_purpose[:50]}... | Quality: {match_quality[:30]}... | Column: {best_column}"
             
-            return score, reasoning
+            print(f"     🤖 LLM Pattern Analysis - {name}:")
+            print(f"         Score: {score:.1f}")
+            print(f"         Purpose: {data_purpose}")
+            print(f"         Best Column: {best_column}")
+            print(f"         Match Quality: {match_quality}")
+            print(f"         Reasoning: {reasoning[:100]}...")
+            
+            return score, full_reasoning
             
         except Exception as e:
             print(f"     ⚠️ LLM scoring failed for {name}: {e}")
