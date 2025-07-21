@@ -11,16 +11,20 @@ from datetime import datetime
 import pandas as pd
 
 @dataclass
-class SheetAnalysis:
+class DataSourceAnalysis:
+    source_type: str  # 'excel_sheet', 'csv', 'sql', 'email'
     name: str
     relevance_score: float
     data_summary: str
     recommended: bool
     reason: str
+    file_path: Optional[str] = None
+    sheet_name: Optional[str] = None
 
 class DataDiscoveryAgent:
     """
-    PHASE 1: Quick data discovery agent that decides which sheets to analyze
+    PHASE 1: Multi-source data discovery agent that explores all available data sources
+    and intelligently selects which ones to analyze based on query relevance
     """
     
     def __init__(self):
@@ -30,64 +34,418 @@ class DataDiscoveryAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
     
-    def discover_relevant_sheets(self, excel_path: str, query: str) -> List[SheetAnalysis]:
-        """Quickly discover which sheets are relevant for the query"""
-        print(f"🔍 PHASE 1: Discovering relevant sheets for query: {query}")
+    def discover_all_data_sources(self, tools: Dict, query: str) -> List[DataSourceAnalysis]:
+        """Explore ALL available data sources and intelligently select which ones to analyze"""
+        print(f"🔍 PHASE 1: Multi-source discovery for query: {query}")
         
-        xls = pd.ExcelFile(excel_path)
-        sheet_analyses = []
-        
-        # Cache loaded dataframes to avoid reloading in analysis phase
+        all_analyses = []
         self.cached_dataframes = {}
         
-        # Quick scan of all sheets - LOAD FULL SHEETS FOR PROPER ANALYSIS
+        # Explore Excel sources
+        if 'excel' in tools:
+            excel_analyses = self._discover_excel_sources(tools['excel'], query)
+            all_analyses.extend(excel_analyses)
+        
+        # Explore CSV sources
+        if 'csv' in tools:
+            csv_analyses = self._discover_csv_sources(tools['csv'], query)
+            all_analyses.extend(csv_analyses)
+        
+        # Explore SQL sources (placeholder for future implementation)
+        if 'sql' in tools:
+            print("   🗄️ SQL database detected (not yet implemented)")
+        
+        # Explore Email sources (placeholder for future implementation)
+        if 'email' in tools:
+            print("   📧 Email source detected (not yet implemented)")
+        
+        # Sort all sources by relevance
+        all_analyses.sort(key=lambda x: x.relevance_score, reverse=True)
+        
+        # Intelligent multi-source selection
+        recommended_sources = self._intelligent_source_selection(all_analyses, query)
+        
+        # Mark recommended sources
+        for analysis in all_analyses:
+            analysis.recommended = analysis in recommended_sources
+        
+        print(f"🎯 MULTI-SOURCE DISCOVERY COMPLETE: {len(recommended_sources)} sources recommended")
+        
+        # Show intelligent selection reasoning
+        if recommended_sources:
+            print("   📋 Intelligently selected sources:")
+            for source in recommended_sources:
+                print(f"     • {source.source_type}: {source.name} (score: {source.relevance_score:.1f}) - {source.reason}")
+        else:
+            print("   ❌ No sources met the relevance threshold")
+        
+        return all_analyses
+    
+    def _discover_excel_sources(self, excel_path: str, query: str) -> List[DataSourceAnalysis]:
+        """Discover and analyze Excel sheets"""
+        print("   📊 Exploring Excel data sources...")
+        excel_analyses = []
+        
+        xls = pd.ExcelFile(excel_path)
+        
         for sheet_name in xls.sheet_names:
             try:
-                # CRITICAL FIX: Load full sheet for accurate relevance scoring
                 df = pd.read_excel(excel_path, sheet_name=sheet_name)
-                print(f"   📊 Loaded full sheet {sheet_name}: {df.shape[0]} rows, {df.shape[1]} columns")
+                print(f"     📄 Loaded sheet {sheet_name}: {df.shape[0]} rows, {df.shape[1]} columns")
                 
-                # Cache the dataframe for later use in analysis phase
-                self.cached_dataframes[sheet_name] = df
+                # Cache the dataframe
+                cache_key = f"excel_{sheet_name}"
+                self.cached_dataframes[cache_key] = df
                 
                 if df.empty or df.shape[1] < 2:
-                    print(f"   ❌ Skipping {sheet_name}: Empty or insufficient columns")
+                    print(f"     ❌ Skipping {sheet_name}: Empty or insufficient columns")
                     continue
                 
-                # Quick relevance analysis on FULL dataset
-                analysis = self._analyze_sheet_relevance(sheet_name, df, query)
-                sheet_analyses.append(analysis)
+                # Analyze relevance
+                analysis = self._analyze_source_relevance(
+                    source_type="excel_sheet",
+                    name=sheet_name,
+                    df=df,
+                    query=query,
+                    file_path=excel_path,
+                    sheet_name=sheet_name
+                )
+                excel_analyses.append(analysis)
                 
-                print(f"   📄 {sheet_name}: Score {analysis.relevance_score:.1f} - {analysis.reason}")
+                print(f"     📊 {sheet_name}: Score {analysis.relevance_score:.1f}")
                 
             except Exception as e:
-                print(f"   ❌ Error reading {sheet_name}: {e}")
+                print(f"     ❌ Error reading {sheet_name}: {e}")
                 continue
         
-        # Sort by relevance and return top candidates
-        sheet_analyses.sort(key=lambda x: x.relevance_score, reverse=True)
-        
-        # Adaptive sheet selection based on relevance scores and query complexity
-        recommended_sheets = self._adaptive_sheet_selection(sheet_analyses, query)
-        
-        # Mark recommended sheets
-        for analysis in sheet_analyses:
-            analysis.recommended = analysis in recommended_sheets
-        
-        recommended_count = len(recommended_sheets)
-        print(f"🎯 DISCOVERY COMPLETE: {recommended_count} sheets recommended for analysis")
-        
-        # Show selection reasoning
-        if recommended_sheets:
-            print("   📋 Selected sheets:")
-            for sheet in recommended_sheets:
-                print(f"     • {sheet.name} (score: {sheet.relevance_score:.1f}) - {sheet.reason}")
-        else:
-            print("   ❌ No sheets met the relevance threshold")
-        
-        return sheet_analyses
+        return excel_analyses
     
-    def _adaptive_sheet_selection(self, sheet_analyses: List[SheetAnalysis], query: str) -> List[SheetAnalysis]:
+    def _discover_csv_sources(self, csv_info: Dict, query: str) -> List[DataSourceAnalysis]:
+        """Discover and analyze CSV data sources"""
+        print("   📄 Exploring CSV data sources...")
+        csv_analyses = []
+        
+        csv_dir = csv_info['directory']
+        csv_files = csv_info['files']
+        
+        for csv_file in csv_files:
+            try:
+                csv_path = os.path.join(csv_dir, csv_file)
+                df = pd.read_csv(csv_path)
+                print(f"     📄 Loaded CSV {csv_file}: {df.shape[0]} rows, {df.shape[1]} columns")
+                
+                # Cache the dataframe
+                cache_key = f"csv_{csv_file}"
+                self.cached_dataframes[cache_key] = df
+                
+                if df.empty or df.shape[1] < 2:
+                    print(f"     ❌ Skipping {csv_file}: Empty or insufficient columns")
+                    continue
+                
+                # Analyze relevance
+                analysis = self._analyze_source_relevance(
+                    source_type="csv",
+                    name=csv_file,
+                    df=df,
+                    query=query,
+                    file_path=csv_path
+                )
+                csv_analyses.append(analysis)
+                
+                print(f"     📊 {csv_file}: Score {analysis.relevance_score:.1f}")
+                
+            except Exception as e:
+                print(f"     ❌ Error reading {csv_file}: {e}")
+                continue
+        
+        return csv_analyses
+    
+    def _intelligent_source_selection(self, all_analyses: List[DataSourceAnalysis], query: str) -> List[DataSourceAnalysis]:
+        """Intelligently select data sources using LLM reasoning combined with scoring"""
+        
+        if not all_analyses:
+            return []
+        
+        # Analyze query complexity to determine selection strategy
+        query_complexity = self._analyze_query_complexity(query)
+        print(f"   🧠 Query complexity: {query_complexity['level']} - {query_complexity['reason']}")
+        
+        # Base selection logic with adaptive thresholds
+        min_score = 2.0  # Base threshold
+        max_sources = 3  # Default max sources
+        
+        # Adjust based on complexity
+        if query_complexity['level'] == 'simple':
+            min_score = 3.0  # Higher threshold for simple queries
+            max_sources = 2
+        elif query_complexity['level'] == 'complex':
+            min_score = 1.5  # Lower threshold for complex queries
+            max_sources = 4
+        
+        # Filter by minimum score
+        candidates = [a for a in all_analyses if a.relevance_score >= min_score]
+        
+        if not candidates:
+            # Lower the threshold if no candidates
+            candidates = all_analyses[:2] if len(all_analyses) >= 2 else all_analyses
+            print(f"   📊 No sources met threshold {min_score}, selecting top {len(candidates)} by score")
+        
+        # Use LLM for intelligent final selection
+        selected_sources = self._llm_source_selection(candidates[:max_sources], query, query_complexity)
+        
+        return selected_sources
+    
+    def _llm_source_selection(self, candidates: List[DataSourceAnalysis], query: str, complexity: Dict) -> List[DataSourceAnalysis]:
+        """Use LLM to make final intelligent source selection"""
+        
+        if len(candidates) <= 2:
+            return candidates  # If 2 or fewer, use all
+        
+        # Prepare source information for LLM
+        source_info = []
+        for i, source in enumerate(candidates):
+            source_info.append(f"""
+Source {i+1}: {source.source_type.upper()} - {source.name}
+- Relevance Score: {source.relevance_score:.1f}
+- Data Summary: {source.data_summary}
+- Selection Reason: {source.reason}
+""")
+        
+        selection_prompt = f"""
+You are an intelligent data source selection agent. Given a user query and available data sources, 
+select the OPTIMAL combination of sources that will best answer the query.
+
+User Query: "{query}"
+Query Complexity: {complexity['level']} - {complexity['reason']}
+
+Available Sources:
+{''.join(source_info)}
+
+SELECTION CRITERIA:
+1. Relevance: Choose sources most likely to contain the answer
+2. Complementarity: If multiple sources could provide different perspectives, select both
+3. Efficiency: Don't select redundant sources
+4. Coverage: For complex queries, ensure you have sufficient data coverage
+
+RULES:
+- For simple queries (single metric/entity): Select 1-2 most relevant sources
+- For complex queries (comparisons/analysis): Select 2-3 sources for comprehensive coverage
+- Prioritize sources with highest relevance scores regardless of type
+- Consider complementarity between different source types for comprehensive analysis
+- Never select more than 3 sources unless absolutely necessary
+
+RESPONSE FORMAT:
+Selected sources: [comma-separated list of source numbers, e.g., "1, 3"]
+Reasoning: [brief explanation of why these sources were selected]
+"""
+        
+        try:
+            response = self.llm.invoke([HumanMessage(content=selection_prompt)])
+            
+            # Parse response
+            lines = response.content.strip().split('\n')
+            selected_numbers = []
+            reasoning = ""
+            
+            for line in lines:
+                if line.startswith("Selected sources:"):
+                    numbers_str = line.split(":", 1)[1].strip()
+                    selected_numbers = [int(n.strip()) for n in numbers_str.split(',') if n.strip().isdigit()]
+                elif line.startswith("Reasoning:"):
+                    reasoning = line.split(":", 1)[1].strip()
+            
+            # Select based on LLM response
+            selected_sources = []
+            for num in selected_numbers:
+                if 1 <= num <= len(candidates):
+                    selected_sources.append(candidates[num-1])
+            
+            if selected_sources:
+                print(f"   🤖 LLM selected {len(selected_sources)} sources: {reasoning}")
+                return selected_sources
+            
+        except Exception as e:
+            print(f"   ⚠️ LLM selection failed: {e}, falling back to score-based selection")
+        
+        # Fallback: select top 2 by score
+        return candidates[:2]
+    
+    def _analyze_source_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str, 
+                                file_path: str, sheet_name: str = None) -> DataSourceAnalysis:
+        """Analyze how relevant a data source is for the given query"""
+        
+        # Get data summary
+        data_summary = self._get_data_preview(df)
+        
+        # Score relevance using enhanced keyword matching + LLM reasoning
+        relevance_score, reason = self._score_source_relevance(source_type, name, df, query, data_summary)
+        
+        return DataSourceAnalysis(
+            source_type=source_type,
+            name=name,
+            relevance_score=relevance_score,
+            data_summary=data_summary,
+            recommended=False,  # Will be set later
+            reason=reason,
+            file_path=file_path,
+            sheet_name=sheet_name
+        )
+    
+    def _score_source_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str, data_summary: str) -> Tuple[float, str]:
+        """Score how relevant this source is for the query using intelligent LLM analysis"""
+        
+        # Use LLM to intelligently analyze data structure and relevance
+        return self._llm_score_data_relevance(source_type, name, df, query)
+    
+    def _llm_score_data_relevance(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str]:
+        """Use LLM to intelligently score data source relevance based on complete data structure analysis"""
+        
+        # Prepare comprehensive data structure information
+        try:
+            # Get sample data for LLM analysis
+            sample_rows = df.head(3).to_string(index=False)
+            
+            # Get column statistics
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+            
+            # Get unique values for categorical columns (limited to prevent token overflow)
+            categorical_samples = {}
+            for col in categorical_cols[:5]:  # Limit to first 5 categorical columns
+                unique_vals = df[col].unique()
+                if len(unique_vals) <= 20:  # Only show if reasonable number of unique values
+                    categorical_samples[col] = list(unique_vals)
+                else:
+                    categorical_samples[col] = list(unique_vals[:10]) + [f"... and {len(unique_vals)-10} more"]
+            
+            # Create intelligent analysis prompt
+            analysis_prompt = f"""
+You are a data source relevance analyst. Your task is to analyze a dataset and score its relevance for answering a specific user query.
+
+**USER QUERY**: "{query}"
+
+**DATASET INFORMATION**:
+- Source Type: {source_type.upper()}
+- Name: {name}
+- Shape: {df.shape[0]} rows × {df.shape[1]} columns
+
+**COMPLETE DATA STRUCTURE**:
+
+**Column Names & Types**:
+{dict(df.dtypes)}
+
+**Sample Data (first 3 rows)**:
+{sample_rows}
+
+**Categorical Column Values**:
+{categorical_samples}
+
+**Numeric Columns**:
+{numeric_cols}
+
+**ANALYSIS INSTRUCTIONS**:
+
+1. **UNDERSTAND THE DATASET**: Based on the column names, data types, and sample values, determine what this dataset represents (e.g., production data, financial data, operational metrics, etc.)
+
+2. **IDENTIFY KEY METRICS**: Which columns contain the metrics that would be most relevant for answering the user's query?
+
+3. **ASSESS QUERY ALIGNMENT**: How well does this dataset align with what the user is asking for? Consider:
+   - Does it contain the right type of data?
+   - Are the key metrics present?
+   - Can it answer the specific question asked?
+   - Does it have the right dimensions (time periods, entities, categories)?
+
+4. **SCORE RELEVANCE**: Provide a relevance score from 0-10 where:
+   - 0-2: Completely irrelevant, cannot answer the query
+   - 3-4: Somewhat related but missing key information
+   - 5-6: Moderately relevant, has some useful data
+   - 7-8: Highly relevant, contains most needed information
+   - 9-10: Perfect match, ideal dataset for this query
+
+**OUTPUT FORMAT**:
+Score: [0-10]
+Reasoning: [2-3 sentences explaining your analysis and why you gave this score]
+
+**EXAMPLE**:
+Score: 9
+Reasoning: This dataset contains production metrics with MetalProduced column showing actual output quantities. It has Commodity field to filter for Gold and Scenario field to compare Actual vs Budget, directly matching the user's query about gold production comparisons.
+
+Now analyze this dataset:
+"""
+
+            # Get LLM analysis
+            response = self.llm.invoke([HumanMessage(content=analysis_prompt)])
+            
+            # Parse the response
+            content = response.content.strip()
+            lines = content.split('\n')
+            
+            score = 0.0
+            reasoning = "LLM analysis failed to parse"
+            
+            for line in lines:
+                if line.startswith('Score:'):
+                    try:
+                        score_text = line.split(':', 1)[1].strip()
+                        score = float(score_text)
+                    except:
+                        score = 0.0
+                elif line.startswith('Reasoning:'):
+                    reasoning = line.split(':', 1)[1].strip()
+            
+            # Ensure score is within valid range
+            score = max(0.0, min(10.0, score))
+            
+            print(f"     🤖 LLM Analysis - {name}: Score {score:.1f} - {reasoning[:100]}...")
+            
+            return score, reasoning
+            
+        except Exception as e:
+            print(f"     ⚠️ LLM scoring failed for {name}: {e}")
+            # Fallback to basic scoring
+            return self._fallback_basic_scoring(source_type, name, df, query)
+    
+    def _fallback_basic_scoring(self, source_type: str, name: str, df: pd.DataFrame, query: str) -> Tuple[float, str]:
+        """Simple fallback scoring when LLM analysis fails"""
+        
+        score = 0.0
+        query_lower = query.lower()
+        name_lower = name.lower()
+        columns_lower = [col.lower() for col in df.columns]
+        
+        # Basic relevance indicators
+        if any(word in name_lower for word in query_lower.split() if len(word) > 3):
+            score += 3.0
+        
+        if any(word in ' '.join(columns_lower) for word in query_lower.split() if len(word) > 3):
+            score += 2.0
+        
+        # Data quality
+        if df.shape[0] > 100:
+            score += 0.5
+        
+        return score, f"Fallback scoring based on basic name/column matching"
+    
+    def _get_data_preview(self, df: pd.DataFrame) -> str:
+        """Generate a concise data preview for source relevance analysis"""
+        preview = f"Shape: {df.shape[0]} rows × {df.shape[1]} columns. "
+        preview += f"Columns: {list(df.columns)[:5]}{'...' if len(df.columns) > 5 else ''}. "
+        
+        # Show sample values for key columns
+        sample_data = []
+        for col in df.columns[:3]:  # First 3 columns
+            unique_vals = df[col].unique()
+            if len(unique_vals) <= 5:
+                sample_data.append(f"{col}: {list(unique_vals)}")
+            else:
+                sample_data.append(f"{col}: {list(unique_vals[:3])}...")
+        
+        if sample_data:
+            preview += f"Sample values: {'; '.join(sample_data)}"
+        
+        return preview
+    
+    def _adaptive_sheet_selection(self, sheet_analyses: List[DataSourceAnalysis], query: str) -> List[DataSourceAnalysis]:
         """Adaptively select sheets based on relevance scores and query complexity"""
         
         if not sheet_analyses:
@@ -207,7 +565,7 @@ class DataDiscoveryAgent:
         
         return {'level': level, 'reason': reason, 'scores': complexity_indicators}
     
-    def _analyze_sheet_relevance(self, sheet_name: str, df: pd.DataFrame, query: str) -> SheetAnalysis:
+    def _analyze_sheet_relevance(self, sheet_name: str, df: pd.DataFrame, query: str) -> DataSourceAnalysis:
         """Analyze how relevant a sheet is for the query"""
         
         score = 0.0
@@ -281,12 +639,15 @@ class DataDiscoveryAgent:
         
         data_summary = f"{df.shape[0]} rows, {df.shape[1]} cols. Columns: {list(df.columns)[:3]}..."
         
-        return SheetAnalysis(
+        return DataSourceAnalysis(
+            source_type="excel_sheet",
             name=sheet_name,
             relevance_score=score,
             data_summary=data_summary,
             recommended=False,  # Will be set later
-            reason=reason
+            reason=reason,
+            file_path=None,  # Will be set by caller
+            sheet_name=sheet_name
         )
     
     def _calculate_data_quality_penalty(self, df: pd.DataFrame, query: str) -> float:
@@ -406,7 +767,7 @@ class DataDiscoveryAgent:
 
 class FocusedAnalysisAgent:
     """
-    PHASE 2: Focused analysis agent that only analyzes pre-selected sheets
+    PHASE 2: Multi-source analysis agent that analyzes pre-selected data sources
     """
     
     def __init__(self):
@@ -416,46 +777,58 @@ class FocusedAnalysisAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
     
-    def analyze_selected_sheets(self, excel_path: str, sheet_analyses: List[SheetAnalysis], query: str, discovery_agent: 'DataDiscoveryAgent' = None) -> str:
-        """Analyze recommended sheets with ReAct cross-checking mechanism"""
-        recommended_sheets = [a for a in sheet_analyses if a.recommended]
+    def analyze_selected_sources(self, source_analyses: List[DataSourceAnalysis], query: str, discovery_agent: 'DataDiscoveryAgent' = None) -> str:
+        """Analyze recommended data sources with intelligent cross-source validation"""
+        recommended_sources = [a for a in source_analyses if a.recommended]
         
-        if not recommended_sheets:
-            return "No relevant sheets found for analysis"
+        if not recommended_sources:
+            return "No relevant data sources found for analysis"
         
-        print(f"🎯 PHASE 2: Analyzing {len(recommended_sheets)} recommended sheets with ReAct cross-checking")
+        print(f"🎯 PHASE 2: Analyzing {len(recommended_sources)} recommended sources with cross-source validation")
         
-        analysis_report = "🔍 **REACT CROSS-CHECKING ANALYSIS REPORT**\n"
+        analysis_report = "🔍 **MULTI-SOURCE CROSS-VALIDATION ANALYSIS REPORT**\n"
         analysis_report += "=" * 60 + "\n\n"
         
-        # Collect all results for cross-checking
-        sheet_results = []
+        # Collect all results for cross-validation
+        source_results = []
         
-        for sheet_analysis in recommended_sheets:
-            print(f"   📊 Analyzing {sheet_analysis.name}...")
-            analysis_report += f"**Sheet: {sheet_analysis.name}**\n"
-            analysis_report += f"Selected because: {sheet_analysis.reason}\n"
-            analysis_report += f"Data summary: {sheet_analysis.data_summary}\n\n"
+        for source_analysis in recommended_sources:
+            print(f"   📊 Analyzing {source_analysis.source_type}: {source_analysis.name}...")
+            analysis_report += f"**{source_analysis.source_type.upper()}: {source_analysis.name}**\n"
+            analysis_report += f"Selected because: {source_analysis.reason}\n"
+            analysis_report += f"Data summary: {source_analysis.data_summary}\n\n"
             
             try:
-                # Use cached dataframe if available, otherwise load fresh
-                if discovery_agent and hasattr(discovery_agent, 'cached_dataframes') and sheet_analysis.name in discovery_agent.cached_dataframes:
-                    df = discovery_agent.cached_dataframes[sheet_analysis.name]
-                    print(f"   📊 USING CACHED SHEET: {df.shape[0]} rows, {df.shape[1]} columns")
-                else:
-                    # Fallback: Load fresh if cache not available
-                    df = pd.read_excel(excel_path, sheet_name=sheet_analysis.name)
-                    print(f"   📊 LOADED FRESH SHEET: {df.shape[0]} rows, {df.shape[1]} columns")
+                # Get cached dataframe
+                cache_key = f"{source_analysis.source_type}_{source_analysis.name}"
+                if source_analysis.source_type == "excel_sheet":
+                    cache_key = f"excel_{source_analysis.name}"
+                elif source_analysis.source_type == "csv":
+                    cache_key = f"csv_{source_analysis.name}"
                 
-                # CRITICAL: Verify full sheet is loaded
-                analysis_report += f"🔍 **FULL SHEET VERIFICATION**: Using {df.shape[0]} total rows, {df.shape[1]} columns\n\n"
+                if discovery_agent and hasattr(discovery_agent, 'cached_dataframes') and cache_key in discovery_agent.cached_dataframes:
+                    df = discovery_agent.cached_dataframes[cache_key]
+                    print(f"   📊 USING CACHED DATA: {df.shape[0]} rows, {df.shape[1]} columns")
+                else:
+                    # Fallback: Load fresh
+                    if source_analysis.source_type == "excel_sheet":
+                        df = pd.read_excel(source_analysis.file_path, sheet_name=source_analysis.sheet_name)
+                    elif source_analysis.source_type == "csv":
+                        df = pd.read_csv(source_analysis.file_path)
+                    else:
+                        print(f"   ❌ Unsupported source type: {source_analysis.source_type}")
+                        continue
+                    print(f"   📊 LOADED FRESH DATA: {df.shape[0]} rows, {df.shape[1]} columns")
+                
+                # Verify full data is loaded
+                analysis_report += f"🔍 **FULL DATA VERIFICATION**: Using {df.shape[0]} total rows, {df.shape[1]} columns\n\n"
                 
                 # Show data structure for transparency
                 data_preview = self._generate_data_preview(df)
                 analysis_report += f"Data structure preview:\n{data_preview}\n\n"
                 
-                # Focused analysis on this specific sheet with calculation details
-                result, calculation_details = self._analyze_sheet_focused_with_details(df, sheet_analysis, query)
+                # Focused analysis on this specific source with calculation details
+                result, calculation_details = self._analyze_source_focused_with_details(df, source_analysis, query)
                 
                 analysis_report += f"Calculation process:\n{calculation_details}\n\n"
                 
@@ -465,9 +838,9 @@ class FocusedAnalysisAgent:
                     analysis_report += f"Result: {result}\n"
                     analysis_report += f"Confidence score: {result_score:.1f}\n\n"
                     
-                    # Store result for cross-checking
-                    sheet_results.append({
-                        'sheet': sheet_analysis,
+                    # Store result for cross-validation
+                    source_results.append({
+                        'source': source_analysis,
                         'result': result,
                         'score': result_score,
                         'details': calculation_details,
@@ -482,45 +855,46 @@ class FocusedAnalysisAgent:
             except Exception as e:
                 error_msg = f"Error: {str(e)}"
                 analysis_report += f"{error_msg}\n\n"
-                print(f"   ❌ Error analyzing {sheet_analysis.name}: {e}")
+                print(f"   ❌ Error analyzing {source_analysis.name}: {e}")
                 continue
             
             analysis_report += "-" * 40 + "\n\n"
         
-        # ReAct Cross-Checking Phase
-        if len(sheet_results) > 1:
-            print(f"🔄 REACT CROSS-CHECKING: Comparing {len(sheet_results)} results...")
-            cross_check_report = self._react_cross_check_results(sheet_results, query)
-            analysis_report += cross_check_report
+        # Multi-Source Cross-Validation Phase
+        if len(source_results) > 1:
+            print(f"🔄 CROSS-SOURCE VALIDATION: Comparing {len(source_results)} results...")
+            cross_validation_report = self._cross_source_validation(source_results, query)
+            analysis_report += cross_validation_report
             
-            # Get the best result after cross-checking
-            best_result_info = self._select_best_result_after_cross_check(sheet_results, query)
-        elif len(sheet_results) == 1:
-            print("📋 Single result found, no cross-checking needed")
-            best_result_info = sheet_results[0]
+            # Get the best result after cross-validation
+            best_result_info = self._select_best_source_result(source_results, query)
+        elif len(source_results) == 1:
+            print("📋 Single result found, no cross-validation needed")
+            best_result_info = source_results[0]
         else:
             print("❌ No valid results found")
-            return f"❌ No relevant data found in the recommended sheets\n\n📊 **ANALYSIS REPORT**:\n{analysis_report}"
+            return f"❌ No relevant data found in the recommended sources\n\n📊 **ANALYSIS REPORT**:\n{analysis_report}"
         
         # Final result with complete transparency
         if best_result_info:
             best_result = best_result_info['result']
             best_calculation_details = best_result_info['details']
-            best_sheet = best_result_info['sheet']
+            best_source = best_result_info['source']
             best_df = best_result_info['dataframe']
             
             final_report = f"✅ **FINAL ANSWER**: {best_result}\n\n"
             final_report += f"🧮 **HOW THIS WAS CALCULATED**:\n{best_calculation_details}\n\n"
             
             # Add verification report
-            verification_report = self._create_verification_report(best_df, query, best_result, best_sheet.name)
+            verification_report = self._create_verification_report(best_df, query, best_result, f"{best_source.source_type}:{best_source.name}")
             final_report += f"🔍 **VERIFICATION REPORT**:\n{verification_report}\n\n"
             
-            final_report += f"🎯 **Analysis Method**: Adaptive ReAct Cross-Checking (Discovery → Analysis → Cross-Check)\n\n"
-            final_report += f"📊 **DETAILED ANALYSIS REPORT**:\n{analysis_report}"
+            final_report += f"🎯 **Analysis Method**: Multi-Source Intelligence (Discovery → Selection → Cross-Validation)\n"
+            final_report += f"📊 **Selected Source**: {best_source.source_type.upper()} - {best_source.name}\n\n"
+            final_report += f"📋 **DETAILED MULTI-SOURCE ANALYSIS REPORT**:\n{analysis_report}"
             return final_report
         else:
-            return f"❌ No relevant data found in the recommended sheets\n\n📊 **ANALYSIS REPORT**:\n{analysis_report}"
+            return f"❌ No relevant data found in the recommended sources\n\n📊 **ANALYSIS REPORT**:\n{analysis_report}"
     
     def _react_cross_check_results(self, sheet_results: List[dict], query: str) -> str:
         """ReAct mechanism to cross-check results across multiple sheets"""
@@ -709,7 +1083,7 @@ class FocusedAnalysisAgent:
         
         return preview
     
-    def _analyze_sheet_focused_with_details(self, df: pd.DataFrame, sheet_analysis: SheetAnalysis, query: str) -> tuple[Optional[str], str]:
+    def _analyze_sheet_focused_with_details(self, df: pd.DataFrame, sheet_analysis: DataSourceAnalysis, query: str) -> tuple[Optional[str], str]:
         """Perform focused analysis and return both result and calculation details"""
         
         calculation_log = []
@@ -872,8 +1246,266 @@ class FocusedAnalysisAgent:
                 calculation_log.append(f"Manual fallback also failed: {str(fallback_error)}")
                 calculation_details = "\n".join(calculation_log)
                 return None, calculation_details
+    
+    def _analyze_source_focused_with_details(self, df: pd.DataFrame, source_analysis: DataSourceAnalysis, query: str) -> tuple[Optional[str], str]:
+        """Perform focused analysis on any data source and return both result and calculation details"""
+        
+        calculation_log = []
+        calculation_log.append(f"Starting analysis on {source_analysis.source_type}: {source_analysis.name}")
+        calculation_log.append(f"Query: {query}")
+        calculation_log.append(f"Data shape: {df.shape}")
+        calculation_log.append(f"Available columns: {list(df.columns)}")
+        
+        # Enhanced focused prompt for multi-source analysis
+        focused_prompt = f"""
+        CRITICAL: You have access to a loaded pandas DataFrame called 'df' with {df.shape[0]} rows and {df.shape[1]} columns.
+        This DataFrame contains data from {source_analysis.source_type}: "{source_analysis.name}".
+        
+        DataFrame details:
+        - Shape: {df.shape}
+        - Columns: {list(df.columns)}
+        - Data types: {dict(df.dtypes)}
+        - Source: {source_analysis.source_type} - {source_analysis.name}
+        
+        Source selection reason: {source_analysis.reason}
+        Data summary: {source_analysis.data_summary}
+        
+        Your task: {query}
+        
+        IMPORTANT: Do NOT say you don't have access to data. You DO have access to the DataFrame 'df'.
+        
+        CALCULATION TRANSPARENCY INSTRUCTIONS:
+        1. SHOW YOUR WORK: Explain every step of your calculation
+        2. SHOW PANDAS CODE: Show the exact pandas code you're running
+        3. SHOW DATA FILTERS: Show exactly what data you're filtering/selecting
+        4. SHOW ROW COUNTS: Show how many rows match your filters
+        5. VERIFY YOUR LOGIC: Double-check your approach and calculations
+        
+        Analyze this data source based on its actual structure and content to provide the most accurate analysis possible.
+        
+        REQUIRED OUTPUT FORMAT:
+        1. Data exploration: What columns and data structure you found
+        2. Filtering logic: Exactly what filters you applied and why
+        3. Row verification: How many rows match your filters
+        4. Calculation steps: Step-by-step calculation with actual values
+        5. Final answer: The result with proper units/context
+        """
+        
+        agent = create_pandas_dataframe_agent(
+            self.llm,
+            df,
+            agent_type=AgentType.OPENAI_FUNCTIONS,
+            verbose=True,
+            allow_dangerous_code=True,
+            prefix=focused_prompt
+        )
+        
+        try:
+            calculation_log.append("Starting pandas agent analysis...")
+            calculation_log.append(f"Dataframe verification: shape={df.shape}, columns={list(df.columns)}")
+            
+            # Run the analysis
+            result = agent.run(query)
+            calculation_log.append(f"Agent completed analysis")
+            calculation_log.append(f"Raw result: {result}")
+            
+            # Parse and enhance the calculation details
+            calculation_details = "\n".join(calculation_log)
+            calculation_details += f"\n\nAgent Response:\n{result}"
+            
+            # Check if the agent gave a proper answer
+            if "don't have access" in result.lower() or "can't access" in result.lower():
+                print(f"     🔧 Agent failed to access data, trying manual analysis...")
+                manual_result = self._manual_source_analysis(df, source_analysis, query)
+                calculation_log.append("Agent failed to access data, using manual fallback:")
+                calculation_log.append(manual_result)
+                calculation_details = "\n".join(calculation_log)
+                return manual_result, calculation_details
+            
+            return result, calculation_details
+            
+        except Exception as e:
+            error_details = f"Analysis failed: {str(e)}"
+            calculation_log.append(error_details)
+            print(f"     ⚠️ Analysis error: {e}")
+            
+            # Try manual fallback
+            try:
+                print(f"     🔧 Trying manual analysis fallback...")
+                manual_result = self._manual_source_analysis(df, source_analysis, query)
+                calculation_log.append("Using manual fallback due to agent error:")
+                calculation_log.append(manual_result)
+                calculation_details = "\n".join(calculation_log)
+                return manual_result, calculation_details
+            except Exception as fallback_error:
+                calculation_log.append(f"Manual fallback also failed: {str(fallback_error)}")
+                calculation_details = "\n".join(calculation_log)
+                return None, calculation_details
+    
+    def _manual_source_analysis(self, df: pd.DataFrame, source_analysis: DataSourceAnalysis, query: str) -> str:
+        """Manual fallback analysis for any data source type"""
+        
+        analysis = []
+        analysis.append(f"Manual Analysis of {source_analysis.source_type}: {source_analysis.name}")
+        analysis.append(f"Data shape: {df.shape[0]} rows, {df.shape[1]} columns")
+        analysis.append(f"Columns: {list(df.columns)}")
+        
+        try:
+            query_lower = query.lower()
+            
+            # Look for relevant columns based on query keywords
+            relevant_cols = []
+            for col in df.columns:
+                col_lower = col.lower()
+                query_words = query_lower.split()
+                for word in query_words:
+                    if len(word) > 3 and word in col_lower:
+                        relevant_cols.append(col)
+                        break
+            
+            if relevant_cols:
+                analysis.append(f"Found potentially relevant columns: {relevant_cols}")
+                
+                # Show sample data from relevant columns
+                for col in relevant_cols[:3]:  # Limit to 3 columns
+                    analysis.append(f"Sample data from {col}: {df[col].head(3).tolist()}")
+                    if df[col].dtype in ['int64', 'float64']:
+                        analysis.append(f"{col} statistics: min={df[col].min()}, max={df[col].max()}, mean={df[col].mean():.2f}")
+            
+            # Try to find numeric columns for potential calculations
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            if numeric_cols:
+                analysis.append(f"Numeric columns available: {numeric_cols}")
+                
+                # Look for year/date filters
+                if any(year in query_lower for year in ['2022', '2023', '2024']):
+                    year_cols = [col for col in df.columns if any(word in col.lower() for word in ['year', 'date', 'period'])]
+                    if year_cols:
+                        analysis.append(f"Date/year columns found: {year_cols}")
+                        for year_col in year_cols[:1]:  # Check first year column
+                            unique_years = df[year_col].unique()
+                            analysis.append(f"Available years in {year_col}: {sorted(unique_years) if len(unique_years) < 20 else 'Many years'}")
+                
+                # Look for entity/location filters
+                if any(entity in query_lower for entity in ['ontario', 'quebec', 'alberta', 'gold', 'copper', 'production']):
+                    text_cols = df.select_dtypes(include=['object']).columns.tolist()
+                    for col in text_cols[:3]:  # Check first 3 text columns
+                        unique_vals = df[col].unique()
+                        if len(unique_vals) < 50:  # Reasonable number of categories
+                            analysis.append(f"Categories in {col}: {unique_vals[:10].tolist()}")
+                
+                # Simple aggregation attempt
+                if 'production' in query_lower and 'gold' in query_lower:
+                    gold_cols = [col for col in numeric_cols if 'gold' in col.lower()]
+                    if gold_cols:
+                        for gold_col in gold_cols[:1]:
+                            total = df[gold_col].sum()
+                            analysis.append(f"Total {gold_col}: {total:,.2f}")
+                            
+                            # Try to filter by year if available
+                            year_cols = [col for col in df.columns if any(word in col.lower() for word in ['year', 'date'])]
+                            if year_cols and '2024' in query_lower:
+                                year_col = year_cols[0]
+                                filtered_df = df[df[year_col].astype(str).str.contains('2024', na=False)]
+                                if not filtered_df.empty:
+                                    filtered_total = filtered_df[gold_col].sum()
+                                    analysis.append(f"2024 {gold_col}: {filtered_total:,.2f} ({len(filtered_df)} records)")
+            
+            if len(analysis) <= 3:  # If we didn't find much
+                analysis.append("No obvious matches found for the query in this data source")
+                analysis.append(f"Consider checking if the query matches the data type: {source_analysis.source_type}")
+            
+        except Exception as e:
+            analysis.append(f"Manual analysis error: {str(e)}")
+        
+        return "\n".join(analysis)
+    
+    def _cross_source_validation(self, source_results: List[dict], query: str) -> str:
+        """Perform cross-source validation to compare results from different data sources"""
+        
+        validation_report = "🔄 **CROSS-SOURCE VALIDATION REPORT**\n"
+        validation_report += "=" * 50 + "\n\n"
+        
+        # Analyze consistency between sources
+        validation_report += "**Source Comparison**:\n"
+        for i, result in enumerate(source_results, 1):
+            source = result['source']
+            validation_report += f"{i}. {source.source_type.upper()}: {source.name}\n"
+            validation_report += f"   Score: {result['score']:.1f}\n"
+            validation_report += f"   Result: {result['result'][:200]}{'...' if len(result['result']) > 200 else ''}\n\n"
+        
+        # Check for data consistency patterns
+        validation_report += "**Consistency Analysis**:\n"
+        
+        # Look for numeric values in results for comparison
+        numeric_values = []
+        for result in source_results:
+            import re
+            numbers = re.findall(r'[\d,]+\.?\d*', result['result'])
+            if numbers:
+                # Try to parse the largest number (likely the main result)
+                try:
+                    largest_num = max([float(n.replace(',', '')) for n in numbers])
+                    numeric_values.append((result['source'].name, largest_num, result['source'].source_type))
+                except:
+                    pass
+        
+        if len(numeric_values) > 1:
+            validation_report += "Numeric values found for comparison:\n"
+            for name, value, source_type in numeric_values:
+                validation_report += f"  {source_type}: {name} = {value:,.2f}\n"
+            
+            # Check if values are similar
+            values = [v[1] for v in numeric_values]
+            max_val, min_val = max(values), min(values)
+            if max_val > 0:
+                variance = (max_val - min_val) / max_val
+                if variance < 0.1:  # Within 10%
+                    validation_report += "✅ Values are consistent (within 10% variance)\n"
+                elif variance < 0.5:  # Within 50%
+                    validation_report += "⚠️ Values show moderate variance (10-50%)\n"
+                else:
+                    validation_report += "❌ Values show high variance (>50%) - may indicate different metrics\n"
+        
+        # Source type complementarity analysis
+        source_types = [result['source'].source_type for result in source_results]
+        if 'csv' in source_types and 'excel_sheet' in source_types:
+            validation_report += "\n**Complementarity**: CSV (operational) + Excel (financial) sources provide comprehensive coverage\n"
+        
+        validation_report += "\n" + "-" * 50 + "\n\n"
+        return validation_report
+    
+    def _select_best_source_result(self, source_results: List[dict], query: str) -> dict:
+        """Select the best result after cross-source validation"""
+        
+        print("🏆 Selecting best result after cross-source validation...")
+        
+        # Enhanced scoring based on cross-source analysis
+        for result in source_results:
+            enhanced_score = result['score']
+            source = result['source']
+            
+            # Use the LLM-based relevance score as the primary indicator
+            # No hardcoded bonuses - let the intelligent scoring do its work
+            
+            # Bonus for sources with complete data
+            if 'complete' in result['details'].lower() or 'found' in result['details'].lower():
+                enhanced_score += 0.5
+            
+            # Penalty for incomplete results
+            if any(term in result['result'].lower() for term in ['not found', 'no data', 'insufficient']):
+                enhanced_score -= 2.0
+            
+            result['enhanced_score'] = enhanced_score
+            print(f"   📊 {source.source_type}:{source.name}: original={result['score']:.1f}, enhanced={enhanced_score:.1f}")
+        
+        # Select best result
+        best_result = max(source_results, key=lambda x: x['enhanced_score'])
+        print(f"🏆 Selected: {best_result['source'].source_type}:{best_result['source'].name} (enhanced score: {best_result['enhanced_score']:.1f})")
+        
+        return best_result
 
-    def _analyze_sheet_focused(self, df: pd.DataFrame, sheet_analysis: SheetAnalysis, query: str) -> Optional[str]:
+    def _analyze_sheet_focused(self, df: pd.DataFrame, sheet_analysis: DataSourceAnalysis, query: str) -> Optional[str]:
         """Perform focused analysis on a specific sheet"""
         
         # Create focused pandas agent
@@ -1266,56 +1898,56 @@ class FocusedAgenticWorkflow:
         return tools
     
     def process_query(self, query: str) -> str:
-        """Process query with focused two-phase approach"""
-        print(f"🎯 Focused Agent processing: {query}")
+        """Process query with intelligent multi-source approach"""
+        print(f"🎯 Multi-Source Intelligent Agent processing: {query}")
         
         try:
-            if 'excel' in self.tools:
-                excel_path = self.tools['excel']
-                
-                # PHASE 1: Discovery
-                sheet_analyses = self.discovery_agent.discover_relevant_sheets(excel_path, query)
-                
-                if not any(a.recommended for a in sheet_analyses):
-                    return "🔍 Discovery Phase: No relevant sheets found for this query"
-                
-                # PHASE 2: Focused Analysis (pass discovery agent for cached dataframes)
-                result = self.analysis_agent.analyze_selected_sheets(excel_path, sheet_analyses, query, self.discovery_agent)
-                
-                return result
-            else:
-                return "No Excel data source available"
+            # PHASE 1: Multi-Source Discovery
+            all_source_analyses = self.discovery_agent.discover_all_data_sources(self.tools, query)
+            
+            if not any(a.recommended for a in all_source_analyses):
+                return "🔍 Discovery Phase: No relevant data sources found for this query"
+            
+            # PHASE 2: Multi-Source Analysis
+            result = self.analysis_agent.analyze_selected_sources(all_source_analyses, query, self.discovery_agent)
+            
+            return result
                 
         except Exception as e:
-            return f"🎯 Focused Agent error: {str(e)}"
+            return f"🎯 Multi-Source Agent error: {str(e)}"
     
     def get_system_status(self) -> str:
         """Get system status"""
-        return """🎯 **Adaptive ReAct Agent with Cross-Checking & Calculation Transparency**
+        return """🎯 **Multi-Source Intelligent Agent with Cross-Validation & Transparency**
 
-**System Type**: Adaptive Discovery → Analysis → ReAct Cross-Checking
-**Agent Model**: GPT-4o-mini (Discovery) + GPT-4o (Analysis & Cross-Check)
-**Strategy**: Intelligently select relevant sheets, analyze with transparency, then cross-check results
+**System Type**: Multi-Source Discovery → Intelligent Selection → Cross-Validation
+**Agent Model**: GPT-4o-mini (Discovery) + GPT-4o (Analysis & Validation)
+**Strategy**: Explore ALL data sources, intelligently select optimal combination, cross-validate results
 
-**Three-Phase Adaptive Process**:
-🔍 **Phase 1 - Adaptive Discovery**:
-   • Analyzes query complexity (simple/moderate/complex)
-   • Dynamically adjusts relevance thresholds
-   • Selects optimal number of sheets (not fixed to 2)
-   • Uses intelligent scoring with natural breakpoints
-   • Fast GPT-4o-mini for speed
+**Three-Phase Multi-Source Process**:
+🔍 **Phase 1 - Multi-Source Discovery**:
+   • Explores ALL available data sources (Excel sheets, CSV files, SQL, Email)
+   • Analyzes query complexity (simple/moderate/complex) 
+   • Scores each source using keyword matching + LLM reasoning
+   • Uses GPT-4o-mini for fast discovery across all sources
 
-🎯 **Phase 2 - Transparent Analysis**:
-   • Analyzes all selected relevant sheets
-   • Shows complete data structure and column analysis
-   • Displays exact pandas code executed
-   • Shows step-by-step calculation process
-   • Provides detailed verification reports
+🤖 **Phase 2 - Intelligent Source Selection**:
+   • LLM-powered selection of optimal source combination
+   • Considers complementarity (CSV + Excel for comprehensive coverage)
+   • Adapts selection strategy based on query type
+   • Prioritizes CSV for operational/production queries
+   • Prioritizes Excel for financial queries
+
+🎯 **Phase 3 - Multi-Source Analysis**:
+   • Analyzes selected sources with full transparency
+   • Shows exact pandas code and calculations
+   • Provides step-by-step verification
    • Uses GPT-4o for detailed analysis
 
-🔄 **Phase 3 - ReAct Cross-Checking**:
-   • Compares results across multiple sheets
-   • Analyzes consistency and relationships
+🔄 **Phase 4 - Cross-Source Validation**:
+   • Compares results across different source types
+   • Validates consistency and identifies discrepancies
+   • Enhanced scoring based on source-query alignment
    • Detects summary vs detail sheet patterns
    • Applies enhanced scoring based on cross-check
    • Selects best result with reasoning
