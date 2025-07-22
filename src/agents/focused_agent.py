@@ -73,9 +73,31 @@ class DataDiscoveryAgent:
    - Priority: MetalProduced > OreProcessed > TonnesMoved
    - Look for: Actual output quantities, not logistics
 
-2. **FINANCIAL QUERIES** ("revenue", "sales", "profit", "cost", "financial"):
-   - Priority: Amount/Revenue > operational metrics
-   - Look for: Dollar values, financial statements
+2. **FINANCIAL QUERIES** - USE COMPREHENSIVE DATA STRUCTURE INTELLIGENCE:
+   
+   **COMPLETE DATA STRUCTURE ANALYSIS**:
+   - Search the ENTIRE data structure for the requested metric:
+     1. Column names (e.g., "Revenue", "NetIncome", "Amount")
+     2. Hierarchical line items (Level1/Level2/Level3 containing "Net Income", "Revenue", etc.)
+     3. Actual data values and line item descriptions
+     4. Sample data content that shows the metric directly
+   
+   **INTELLIGENT DECISION LOGIC**:
+   - **DIRECT PRESENCE** (Score 9-10): Metric found anywhere in the data structure
+     - Column name matches query terms
+     - OR Level1/Level2/Level3 contains the exact metric as line items  
+     - OR sample data shows the metric is directly available
+   
+   - **CALCULATION REQUIRED** (Score based on components available):
+     - Metric NOT found directly anywhere in data structure
+     - Check if sheet has BUILDING BLOCKS for calculation
+     - Detailed P&L sheets (Level1/Level2/Level3) with revenue/expense components = High score
+     - Summary sheets with only totals = Lower score (limited calculation ability)
+   
+   **PRESERVATION OF EXISTING LOGIC**:
+   - Continue prioritizing sheets with strong domain matches (production, operational, financial)
+   - Maintain hierarchical data structure scoring (Level1/Level2/Level3 indicates detailed data)
+   - Keep sample data analysis for understanding data quality and relevance
 
 3. **OPERATIONAL EFFICIENCY** ("efficiency", "utilization", "performance"):
    - Priority: RecoveryRate, EquipmentUtilization > raw output
@@ -113,11 +135,34 @@ Key Fields: [Comma-separated list of most important columns]
 Expertise Needed: [What kind of expert should analyze this data]
 Field Variations: [Common abbreviations for key fields, format: field=abbrev1,abbrev2|field2=abbrev3]
 
-**DOMAIN-SPECIFIC EXAMPLES**:
-Query: "gold production 2024" → MetalProduced/GoldProduced columns = Score 9-10
-Query: "tonnes moved" → TonnesMoved columns = Score 9-10  
-Query: "revenue breakdown" → Amount with financial Level1/2/3 = Score 9-10
-Query: "equipment efficiency" → EquipmentUtilization/RecoveryRate = Score 8-9"""
+**COMPREHENSIVE DATA STRUCTURE ANALYSIS EXAMPLES**:
+
+**Example 1 - Direct Match in Column:**
+Query: "What was total revenue in 2024?"
+Sheet has: ["Date", "Entity", "Revenue", "Amount"]
+Analysis: "Revenue" column exists directly → Score 9-10
+
+**Example 2 - Direct Match in Line Items:**
+Query: "What was net income in 2024?"  
+Sheet has: ["Date", "Entity", "Level1", "Level2", "Amount"]
+Sample data shows: Level1="Net Income", Level2="After Tax"
+Analysis: "Net Income" exists as Level1 line item → Score 9-10
+
+**Example 3 - No Direct Match, Calculation Possible:**
+Query: "What was net income in 2024?"
+Sheet has: ["Date", "Entity", "Level1", "Level2", "Amount"]
+Sample data shows: Level1="Revenue", Level1="Operating Expenses", etc.
+Analysis: No direct "Net Income" but has P&L building blocks → Score 7-8
+
+**Example 4 - No Direct Match, Limited Calculation:**
+Query: "What was net income in 2024?"
+Sheet has: ["Date", "Entity", "Amount"] (summary totals only)
+Analysis: No "Net Income" anywhere, no detailed components → Score 3-4
+
+**COMPREHENSIVE INTELLIGENCE PRINCIPLE**:
+- Search ALL levels: column names, hierarchical data, sample content, line item descriptions
+- Preserve existing domain expertise while adding calculation intelligence
+- Score based on data structure depth and component availability"""
     
     def discover_all_data_sources(self, tools: Dict, query: str) -> List[DataSourceAnalysis]:
         """Explore ALL available data sources and intelligently select which ones to analyze"""
