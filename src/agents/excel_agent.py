@@ -260,63 +260,44 @@ class ExcelAgent:
         return self.worksheet_agents.get(sheet_name)
     
     def _determine_relevant_worksheets(self, query: str) -> List[str]:
-        """Determine which worksheets are relevant for the query using keyword matching and LLM fallback"""
-        query_lower = query.lower()
+        """Determine which worksheets are relevant for the query using intelligent LLM analysis"""
         
-        # First try keyword-based matching
-        keyword_matches = []
+        # Get detailed worksheet information for better LLM decision making
+        worksheet_details = {}
+        for sheet_name in self.worksheet_info['sheet_names']:
+            sheet_info = self.worksheet_info['worksheets'].get(sheet_name, {})
+            worksheet_details[sheet_name] = {
+                'shape': sheet_info.get('shape', 'Unknown'),
+                'columns': sheet_info.get('columns', []),
+                'numeric_columns': sheet_info.get('numeric_columns', []),
+                'categorical_columns': sheet_info.get('categorical_columns', [])
+            }
         
-        # Define keyword mappings for worksheet names
-        worksheet_keywords = {
-            'TB': ['trial balance', 'tb', 'balance sheet'],
-            'VW_PBI': ['vw_pbi', 'pbi', 'power bi', 'main data', 'detailed', 'breakdown', 'transactions', 'revenue breakdown', 'detailed revenue', 'commodity breakdown'],
-            'AR': ['accounts receivable', 'ar', 'receivables', 'aging'],
-            'Debt Schedule': ['debt', 'debt schedule', 'loans', 'borrowing'],
-            'COA': ['chart of accounts', 'coa', 'accounts', 'account structure'],
-            'By Entity': ['entity summary', 'entities summary', 'total by entity', 'summary by entity'],
-            'By Office': ['office summary', 'offices summary', 'total by office'],
-            'By Project': ['project summary', 'projects summary', 'total by project'],
-            'By Vendor': ['vendor summary', 'vendors summary', 'supplier summary'],
-            'By LOB': ['lob', 'line of business'],
-            'By COA Group': ['coa group', 'account group'],
-            'Arora Hierarchy': ['hierarchy', 'arora']
-        }
-        
-        # Check for keyword matches
-        for sheet_name, keywords in worksheet_keywords.items():
-            if sheet_name in self.worksheet_info['sheet_names']:
-                for keyword in keywords:
-                    if keyword in query_lower:
-                        keyword_matches.append(sheet_name)
-                        break
-        
-        if keyword_matches:
-            # If we have matches, check for ambiguous cases
-            if len(keyword_matches) == 1:
-                return keyword_matches
-            elif 'By Entity' in keyword_matches and 'VW_PBI' in keyword_matches:
-                # If both match, prefer VW_PBI for detailed queries unless explicitly asking for summary
-                if any(word in query_lower for word in ['summary', 'total', 'aggregate']):
-                    return ['By Entity']
-                else:
-                    return ['VW_PBI']
-            else:
-                return keyword_matches
-        
-        # If no keyword matches but query mentions entity/revenue, default to VW_PBI for detailed data
-        if any(word in query_lower for word in ['entity', 'revenue', 'amount']) and not any(word in query_lower for word in ['summary', 'total']):
-            return ['VW_PBI']
-        
-        # If no keyword matches, try LLM
         prompt = f"""
-        Given the following Excel worksheets and a user query, determine which worksheets are most relevant.
+        You are an intelligent data analyst tasked with selecting the most relevant Excel worksheets for a user query.
         
-        Available worksheets: {', '.join(self.worksheet_info['sheet_names'])}
+        Available worksheets with their data structure:
+        {json.dumps(worksheet_details, indent=2)}
         
         User query: {query}
         
-        Return ONLY the exact sheet names that are relevant, separated by commas. 
-        For example: "TB, VW_PBI" or "AR" or "Debt Schedule"
+        Analyze the query and worksheet structures to determine which sheets are most likely to contain the data needed to answer the question. Consider:
+        
+        1. Column names that relate to the query terms
+        2. Sheet names that suggest relevant data
+        3. Data structure (number of rows/columns) that indicates detail level
+        4. Numeric vs categorical columns for the type of analysis needed
+        
+        Return ONLY the exact sheet names that are most relevant, separated by commas.
+        Focus on sheets that directly contain the data to answer the query.
+        Prioritize sheets with relevant columns and appropriate data granularity.
+        
+        Examples:
+        - For financial queries: sheets with Amount, Revenue, or financial columns
+        - For summary queries: sheets with aggregated data
+        - For detailed analysis: sheets with granular transaction data
+        
+        Response format: "SheetName1, SheetName2" or "SheetName1"
         """
         
         try:
@@ -328,11 +309,14 @@ class ExcelAgent:
             
             # If LLM didn't return valid sheets, fallback to first sheet
             if not valid_sheets:
+                print(f"   ⚠️ LLM didn't return valid sheets, using fallback: {self.worksheet_info['sheet_names'][0]}")
                 return [self.worksheet_info['sheet_names'][0]]
             
+            print(f"   🧠 LLM selected worksheets: {valid_sheets}")
             return valid_sheets
             
         except Exception as e:
+            print(f"   ⚠️ Error in LLM worksheet selection: {str(e)}, using fallback")
             # Ultimate fallback: return the first worksheet
             return [self.worksheet_info['sheet_names'][0]]
     
@@ -448,10 +432,21 @@ class ExcelAgent:
         
         return "\n".join(results) if results else ""
     
-    def query(self, question: str) -> str:
+    def query(self, question: str, recommended_sheets: List[str] = None) -> str:
         try:
-            # Determine which worksheets are relevant
-            relevant_sheets = self._determine_relevant_worksheets(question)
+            # Use recommended sheets from router if provided, otherwise determine ourselves
+            if recommended_sheets:
+                # Validate that recommended sheets exist
+                valid_sheets = [sheet for sheet in recommended_sheets if sheet in self.worksheet_info['sheet_names']]
+                if valid_sheets:
+                    relevant_sheets = valid_sheets
+                    print(f"   ✅ Using router-recommended sheets: {relevant_sheets}")
+                else:
+                    print(f"   ⚠️ Router-recommended sheets {recommended_sheets} not found, falling back to keyword matching")
+                    relevant_sheets = self._determine_relevant_worksheets(question)
+            else:
+                # Determine which worksheets are relevant using original logic
+                relevant_sheets = self._determine_relevant_worksheets(question)
             
             if not relevant_sheets:
                 return "Could not determine relevant worksheets for your query."
@@ -479,10 +474,6 @@ class ExcelAgent:
         return info
     
     def is_applicable(self, query: str) -> bool:
-        excel_keywords = [
-            'excel', 'spreadsheet', 'worksheet', 'workbook',
-            'cell', 'formula', 'pivot', 'chart', 'xlsx', 'sheet'
-        ]
-        
-        query_lower = query.lower()
-        return any(keyword in query_lower for keyword in excel_keywords)
+        # Always return True to let the router/LLM decide if Excel is appropriate
+        # Remove hardcoded keyword matching
+        return True

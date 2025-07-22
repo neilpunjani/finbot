@@ -1774,32 +1774,34 @@ Apply your general analytical skills to:
         return validation_report
     
     def _select_best_source_result(self, source_results: List[dict], query: str) -> dict:
-        """Select the best result after cross-source validation"""
+        """Select the best result respecting the router's original prioritization"""
         
-        print("🏆 Selecting best result after cross-source validation...")
+        print("🏆 Selecting best result based on router's recommendations...")
         
-        # Enhanced scoring based on cross-source analysis
-        for result in source_results:
-            enhanced_score = result['score']
+        # Sort by the router's original relevance scores (highest first)
+        # This respects the intelligent routing decision without second-guessing it
+        source_results_sorted = sorted(source_results, key=lambda x: x['source'].relevance_score, reverse=True)
+        
+        # Log the router's prioritization
+        for result in source_results_sorted:
             source = result['source']
-            
-            # Use the LLM-based relevance score as the primary indicator
-            # No hardcoded bonuses - let the intelligent scoring do its work
-            
-            # Bonus for sources with complete data
-            if 'complete' in result['details'].lower() or 'found' in result['details'].lower():
-                enhanced_score += 0.5
-            
-            # Penalty for incomplete results
-            if any(term in result['result'].lower() for term in ['not found', 'no data', 'insufficient']):
-                enhanced_score -= 2.0
-            
-            result['enhanced_score'] = enhanced_score
-            print(f"   📊 {source.source_type}:{source.name}: original={result['score']:.1f}, enhanced={enhanced_score:.1f}")
+            print(f"   📊 {source.source_type}:{source.name}: router_score={source.relevance_score:.1f}, result_quality_score={result['score']:.1f}")
         
-        # Select best result
-        best_result = max(source_results, key=lambda x: x['enhanced_score'])
-        print(f"🏆 Selected: {best_result['source'].source_type}:{best_result['source'].name} (enhanced score: {best_result['enhanced_score']:.1f})")
+        # Only override router's decision if there's a significant quality issue with the top choice
+        best_result = source_results_sorted[0]
+        
+        # Check if the router's top choice has a fundamentally broken result
+        if any(term in best_result['result'].lower() for term in ['error', 'failed', 'could not', 'unable to']):
+            print(f"   ⚠️ Router's top choice has execution errors, checking alternatives...")
+            
+            # Look for the highest-scoring alternative that actually worked
+            for result in source_results_sorted[1:]:
+                if not any(term in result['result'].lower() for term in ['error', 'failed', 'could not', 'unable to']):
+                    print(f"   🔄 Switching to: {result['source'].source_type}:{result['source'].name} (functional alternative)")
+                    best_result = result
+                    break
+        
+        print(f"🏆 Selected: {best_result['source'].source_type}:{best_result['source'].name} (router score: {best_result['source'].relevance_score:.1f})")
         
         return best_result
 

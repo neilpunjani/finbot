@@ -92,79 +92,59 @@ class CSVAgent:
         return self.agents.get(csv_name)
     
     def _determine_relevant_csv(self, query: str) -> str:
-        """Determine which CSV file is most relevant for the query using intelligent scoring"""
-        query_lower = query.lower()
+        """Determine which CSV file is most relevant for the query using intelligent LLM analysis"""
         
-        # Score each CSV file
-        scores = {}
+        # Prepare CSV file details for LLM analysis
+        csv_details = {}
         for csv_name, csv_info in self.csv_files.items():
-            score = 0
-            
-            # Score based on filename keywords
-            filename_words = csv_name.split()
-            for word in filename_words:
-                if word in query_lower:
-                    score += 3
-            
-            # Score based on column name matches
-            for column in csv_info['columns']:
-                column_lower = column.lower()
-                if column_lower in query_lower:
-                    score += 2
-                # Check for partial matches
-                for word in column_lower.split('_'):
-                    if word in query_lower:
-                        score += 1
-            
-            # Enhanced scoring for production-related queries
-            if any(keyword in query_lower for keyword in ['produced', 'production', 'metal', 'recovery', 'grade', 'ore']):
-                if 'production' in csv_name.lower():
-                    score += 10  # Strong preference for production data
-                elif any(col in csv_info['columns'] for col in ['MetalProduced', 'RecoveryRate', 'Grade', 'OreProcessed']):
-                    score += 5
-            
-            # Enhanced scoring for operational queries
-            if any(keyword in query_lower for keyword in ['equipment', 'utilization', 'downtime', 'tonnes']):
-                if 'operational' in csv_name.lower():
-                    score += 10
-                elif any(col in csv_info['columns'] for col in ['EquipmentUtilization', 'DowntimeHours', 'TonnesMoved']):
-                    score += 5
-            
-            # Enhanced scoring for workforce queries
-            if any(keyword in query_lower for keyword in ['training', 'headcount', 'workforce', 'contractor']):
-                if 'workforce' in csv_name.lower():
-                    score += 10
-                elif any(col in csv_info['columns'] for col in ['TrainingHours', 'Headcount', 'ContractorRatio']):
-                    score += 5
-            
-            # Enhanced scoring for environmental queries
-            if any(keyword in query_lower for keyword in ['ghg', 'emissions', 'water', 'energy', 'environmental']):
-                if 'esg' in csv_name.lower():
-                    score += 10
-                elif any(col in csv_info['columns'] for col in ['GHGEmissions_tCO2e', 'WaterUse_m3', 'Energy_kWh']):
-                    score += 5
-            
-            # Score based on data content similarity
-            if 'customer' in query_lower:
-                if any('customer' in col.lower() for col in csv_info['columns']):
-                    score += 2
-                if any('name' in col.lower() for col in csv_info['columns']):
-                    score += 1
-            
-            if any(keyword in query_lower for keyword in ['sales', 'revenue', 'product', 'purchase', 'order']):
-                if any(keyword in col.lower() for col in csv_info['columns'] for keyword in ['sales', 'revenue', 'product', 'amount', 'price']):
-                    score += 2
-            
-            scores[csv_name] = score
+            csv_details[csv_name] = {
+                'shape': csv_info.get('shape', 'Unknown'),
+                'columns': csv_info.get('columns', []),
+                'sample_data': csv_info.get('sample_data', 'Not available')
+            }
         
-        # Return the CSV with highest score
-        if scores:
-            best_csv = max(scores.items(), key=lambda x: x[1])[0]
-            if scores[best_csv] > 0:
-                return best_csv
+        prompt = f"""
+        You are an intelligent data analyst tasked with selecting the most relevant CSV file for a user query.
         
-        # Fallback: use LLM to decide
-        return self._llm_csv_selection(query)
+        Available CSV files with their data structure:
+        {json.dumps(csv_details, indent=2)}
+        
+        User query: {query}
+        
+        Analyze the query and CSV file structures to determine which file is most likely to contain the data needed to answer the question. Consider:
+        
+        1. File names that suggest relevant data
+        2. Column names that relate to the query terms
+        3. Data structure that indicates the appropriate level of detail
+        4. Sample data that might match the query context
+        
+        Return ONLY the exact CSV filename that is most relevant.
+        Focus on the file that directly contains the data to answer the query.
+        
+        Examples:
+        - For production queries: files with production, metal, or mining-related columns
+        - For operational queries: files with equipment, utilization, or operational columns
+        - For workforce queries: files with employee, training, or headcount columns
+        - For financial queries: files with revenue, amount, or financial columns
+        
+        Response format: "filename.csv"
+        """
+        
+        try:
+            response = self.llm.invoke([HumanMessage(content=prompt)])
+            selected_csv = response.content.strip().strip("'\"")
+            
+            # Validate that the selected CSV exists
+            if selected_csv in self.csv_files:
+                print(f"   🧠 LLM selected CSV: {selected_csv}")
+                return selected_csv
+            else:
+                print(f"   ⚠️ LLM returned invalid CSV '{selected_csv}', using fallback")
+                return list(self.csv_files.keys())[0]
+            
+        except Exception as e:
+            print(f"   ⚠️ Error in LLM CSV selection: {str(e)}, using fallback")
+            return list(self.csv_files.keys())[0]
     
     def _llm_csv_selection(self, query: str) -> str:
         """Use LLM to select the best CSV file when scoring doesn't give clear winner"""
@@ -235,10 +215,19 @@ class CSVAgent:
         
         return None
     
-    def query(self, question: str) -> str:
+    def query(self, question: str, recommended_csv: str = None) -> str:
         try:
-            # Determine which CSV to use
-            relevant_csv = self._determine_relevant_csv(question)
+            # Use router-recommended CSV if provided, otherwise determine ourselves
+            if recommended_csv:
+                if recommended_csv in self.csv_files:
+                    relevant_csv = recommended_csv
+                    print(f"   ✅ Using router-recommended CSV: {relevant_csv}")
+                else:
+                    print(f"   ⚠️ Router-recommended CSV '{recommended_csv}' not found, falling back to LLM selection")
+                    relevant_csv = self._determine_relevant_csv(question)
+            else:
+                # Determine which CSV to use (fallback for direct calls)
+                relevant_csv = self._determine_relevant_csv(question)
             
             # Check if this is a specific query pattern we can handle directly
             direct_result = self._try_direct_calculation(question, relevant_csv)
@@ -397,97 +386,11 @@ class CSVAgent:
         return components
     
     def _smart_metric_interpretation(self, question_lower, components):
-        """Intelligently interpret what metric the user is actually asking for"""
-        import re
-        
-        # Define smart patterns that map natural language to actual metrics
-        smart_patterns = {
-            # Pattern: (regex_pattern, target_metric, required_commodity_context)
-            
-            # PRODUCTION METRICS  
-            (r'\b(?:total|sum|amount of|how much|quantity of)?\s*(?:gold|copper|zinc|nickel)\s+(?:produced|production|output|generated)', 'MetalProduced', True),
-            (r'\b(?:how much|amount of|quantity of)\s+(?:gold|copper|zinc|nickel)\s+(?:was|were|is|are)?\s*(?:produced|generated)', 'MetalProduced', True),
-            (r'\b(?:gold|copper|zinc|nickel)\s+(?:produced|production|output)', 'MetalProduced', True),
-            (r'\b(?:total|sum|amount of)?\s*(?:metal|metals)\s+(?:produced|production|output)', 'MetalProduced', False),
-            (r'\b(?:total|sum|amount of)?\s*(?:ore|material)\s+(?:processed|processing|handled)', 'OreProcessed', False),
-            (r'\b(?:total|sum|amount of)?\s*(?:tonnes|tons)\s+(?:moved|transported|handled)', 'TonnesMoved', False),
-            
-            # RECOVERY AND GRADE METRICS  
-            (r'\b(?:recovery|recovery rate|extraction rate)\s+(?:of|for)?\s*(?:gold|copper|zinc|nickel)', 'RecoveryRate', True),
-            (r'\b(?:grade|ore grade|metal grade)\s+(?:of|for)?\s*(?:gold|copper|zinc|nickel)', 'Grade', True),
-            (r'\b(?:average|mean)?\s*(?:recovery|recovery rate)', 'RecoveryRate', False),
-            (r'\b(?:average|mean)?\s*(?:grade|ore grade)', 'Grade', False),
-            (r'\b(?:gold|copper|zinc|nickel)\s+(?:recovery|recovery rate)', 'RecoveryRate', True),
-            (r'\b(?:gold|copper|zinc|nickel)\s+(?:grade|ore grade)', 'Grade', True),
-            
-            # OPERATIONAL METRICS
-            (r'\b(?:equipment|machinery)\s+(?:utilization|usage|efficiency)', 'EquipmentUtilization', False),
-            (r'\b(?:downtime|down time)\s+(?:hours|time)', 'DowntimeHours', False),
-            (r'\b(?:utilization|usage)\s+(?:rate|percentage)', 'EquipmentUtilization', False),
-            
-            # WORKFORCE METRICS
-            (r'\b(?:training|train)\s+(?:hours|time)', 'TrainingHours', False),
-            (r'\b(?:headcount|head count|workforce|employees|staff)', 'Headcount', False),
-            (r'\b(?:contractor|contractors)\s+(?:ratio|percentage)', 'ContractorRatio', False),
-            
-            # SAFETY METRICS
-            (r'\btrifr\b', 'TRIFR', False),
-            (r'\bltifr\b', 'LTIFR', False),
-            (r'\b(?:total recordable injury frequency|total recordable injury)', 'TRIFR', False),
-            (r'\b(?:lost time injury frequency|lost time injury)', 'LTIFR', False),
-            
-            # ENVIRONMENTAL METRICS
-            (r'\b(?:ghg|greenhouse gas|carbon)\s+(?:emissions|emission)', 'GHG_Emissions', False),
-            (r'\b(?:emissions|emission)\b', 'GHG_Emissions', False),
-            (r'\b(?:water|h2o)\s+(?:use|usage|consumption)', 'Water_Use', False),
-            (r'\b(?:energy|power)\s+(?:use|usage|consumption)', 'Energy', False),
-        }
-        
-        detected_metrics = []
-        
-        # Check each smart pattern
-        for pattern, metric, requires_commodity in smart_patterns:
-            if re.search(pattern, question_lower):
-                # If the pattern requires commodity context, check if commodity is mentioned
-                if requires_commodity and components['commodities']:
-                    detected_metrics.append(metric)
-                elif not requires_commodity:
-                    detected_metrics.append(metric)
-        
-        # If no smart patterns matched, fall back to traditional keyword matching
-        if not detected_metrics:
-            detected_metrics = self._traditional_metric_matching(question_lower)
-        
-        # Remove duplicates while preserving order
-        return list(dict.fromkeys(detected_metrics))
+        """Use LLM to intelligently interpret what metric the user is asking for"""
+        # Remove hardcoded patterns, let the pandas agent figure out what columns to use
+        # This relies on LLM intelligence rather than keyword matching
+        return []
     
-    def _traditional_metric_matching(self, question_lower):
-        """Traditional keyword-based metric matching as fallback"""
-        metric_mappings = {
-            'training hours': 'TrainingHours',
-            'headcount': 'Headcount',
-            'contractor ratio': 'ContractorRatio',
-            'ghg emissions': 'GHG_Emissions',
-            'emissions': 'GHG_Emissions',
-            'water use': 'Water_Use',
-            'energy': 'Energy',
-            'equipment utilization': 'EquipmentUtilization',
-            'downtime hours': 'DowntimeHours',
-            'tonnes moved': 'TonnesMoved',
-            'ore processed': 'OreProcessed',
-            'grade': 'Grade',
-            'recovery rate': 'RecoveryRate',
-            'metal produced': 'MetalProduced',
-            'trifr': 'TRIFR',
-            'ltifr': 'LTIFR'
-        }
-        
-        detected_metrics = []
-        for metric_phrase, column_name in metric_mappings.items():
-            if metric_phrase in question_lower:
-                detected_metrics.append(column_name)
-        
-        return detected_metrics
     
     def _apply_query_filters(self, df, components):
         """Apply filters based on parsed query components"""
@@ -854,10 +757,6 @@ class CSVAgent:
         return info
     
     def is_applicable(self, query: str) -> bool:
-        csv_keywords = [
-            'csv', 'comma separated', 'data file', 'text file',
-            'delimiter', 'tabular data', 'sales data', 'customer data'
-        ]
-        
-        query_lower = query.lower()
-        return any(keyword in query_lower for keyword in csv_keywords)
+        # Always return True to let the router/LLM decide if CSV is appropriate
+        # Remove hardcoded keyword matching
+        return True
