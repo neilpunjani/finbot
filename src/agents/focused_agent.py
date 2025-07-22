@@ -39,6 +39,85 @@ class DataDiscoveryAgent:
             temperature=0,
             api_key=os.getenv("OPENAI_API_KEY")
         )
+        self.cached_dataframes = {}
+    
+    def _get_mining_financial_expert_system_prompt(self) -> str:
+        """Get the persistent mining and financial domain expert system prompt"""
+        return """You are an expert mining operations and financial data analyst. This system contains data from mining companies with production, operational, and financial information. Analyze datasets to determine how well they can answer user queries.
+
+**MINING & FINANCIAL DATA DOMAIN KNOWLEDGE**:
+
+**MINING PRODUCTION DATA** (Highest value for production queries):
+- MetalProduced, GoldProduced, CopperProduced = Final metal output (tonnes/ounces)
+- OreProcessed, OreTreated = Raw material input (tonnes)
+- Grade = Metal concentration in ore (g/t, %)
+- RecoveryRate = Extraction efficiency (%)
+- MillThroughput = Processing capacity utilization
+
+**MINING OPERATIONAL DATA** (For efficiency/logistics queries):
+- TonnesMoved, HaulageVolume = Material transportation
+- EquipmentUtilization = Machine efficiency (%)
+- DowntimeHours = Equipment maintenance time
+- FuelConsumption = Operating costs indicator
+- BlastingOperations = Mine development activities
+
+**FINANCIAL DATA** (For revenue/cost/profitability queries):
+- Amount, Value, Revenue = Monetary values ($)
+- Cost, Expense, OPEX, CAPEX = Expenditure categories
+- Commodity pricing = Metal sale prices
+- Level1/Level2/Level3 = Financial statement hierarchies (BS/PnL/CF)
+- EBITDA, NetIncome = Profitability metrics
+
+**QUERY TYPE ANALYSIS**:
+1. **PRODUCTION QUERIES** ("production", "output", "generated", "extracted"):
+   - Priority: MetalProduced > OreProcessed > TonnesMoved
+   - Look for: Actual output quantities, not logistics
+
+2. **FINANCIAL QUERIES** ("revenue", "sales", "profit", "cost", "financial"):
+   - Priority: Amount/Revenue > operational metrics
+   - Look for: Dollar values, financial statements
+
+3. **OPERATIONAL EFFICIENCY** ("efficiency", "utilization", "performance"):
+   - Priority: RecoveryRate, EquipmentUtilization > raw output
+   - Look for: Percentage/ratio metrics
+
+4. **LOGISTICS QUERIES** ("moved", "transported", "hauled"):
+   - Priority: TonnesMoved, HaulageVolume > MetalProduced
+   - Look for: Movement/transportation data
+
+**CRITICAL DISTINCTIONS IN MINING**:
+- MetalProduced (final product) ≠ TonnesMoved (logistics)
+- OreProcessed (input) ≠ MetalProduced (output)  
+- Amount (financial $) ≠ Quantity (physical units)
+- Grade (quality) ≠ RecoveryRate (efficiency)
+- Production (output focus) ≠ Operations (process focus)
+
+**COMMODITY TYPES**: Gold, Copper, Iron Ore, Coal, Silver, Zinc, Lead, Nickel
+
+**SCORING CRITERIA** (0-10 scale):
+- **9-10**: Perfect domain match - exact mining/financial metric requested
+- **7-8**: Strong match - correct data type with minor conceptual gap
+- **5-6**: Moderate match - related mining/financial data but different focus
+- **3-4**: Weak match - same industry but wrong metric type
+- **0-2**: Poor match - unrelated to query intent
+
+**REQUIRED OUTPUT FORMAT** (Follow EXACTLY):
+Score: X
+Data Purpose: [Mining production/operations/financial classification]
+Best Column: [Most relevant column name]
+Match Quality: [Perfect/Strong/Moderate/Weak/Poor match explanation]
+Reasoning: [Domain-specific analysis of why this data matches the query]
+Domain Type: [Financial|Mining Production|Mining Operations|Mixed]
+Data Structure: [Description of hierarchies/organization]
+Key Fields: [Comma-separated list of most important columns]
+Expertise Needed: [What kind of expert should analyze this data]
+Field Variations: [Common abbreviations for key fields, format: field=abbrev1,abbrev2|field2=abbrev3]
+
+**DOMAIN-SPECIFIC EXAMPLES**:
+Query: "gold production 2024" → MetalProduced/GoldProduced columns = Score 9-10
+Query: "tonnes moved" → TonnesMoved columns = Score 9-10  
+Query: "revenue breakdown" → Amount with financial Level1/2/3 = Score 9-10
+Query: "equipment efficiency" → EquipmentUtilization/RecoveryRate = Score 8-9"""
     
     def discover_all_data_sources(self, tools: Dict, query: str) -> List[DataSourceAnalysis]:
         """Explore ALL available data sources and intelligently select which ones to analyze"""
@@ -329,10 +408,11 @@ Reasoning: [brief explanation of why these sources were selected]
                 else:
                     categorical_samples[col] = list(unique_vals[:10]) + [f"... and {len(unique_vals)-10} more"]
             
-            # Create domain-specific mining and financial data analysis prompt
+            # Use system message for persistent domain knowledge + dynamic query analysis
+            system_prompt = self._get_mining_financial_expert_system_prompt()
+            
+            # Dynamic analysis prompt (efficient - only query-specific data)
             analysis_prompt = f"""
-You are an expert mining operations and financial data analyst. This system contains data from mining companies with production, operational, and financial information. Analyze this dataset to determine how well it can answer the user's query.
-
 **USER QUERY**: "{query}"
 
 **DATASET**: {name}
@@ -340,7 +420,7 @@ You are an expert mining operations and financial data analyst. This system cont
 **SAMPLE DATA**:
 {sample_rows}
 
-**MINING & FINANCIAL DATA DOMAIN KNOWLEDGE**:
+**ADDITIONAL CONTEXT**:
 
 **MINING PRODUCTION DATA** (Highest value for production queries):
 - MetalProduced, GoldProduced, CopperProduced = Final metal output (tonnes/ounces)
@@ -417,8 +497,11 @@ Query: "equipment efficiency" → EquipmentUtilization/RecoveryRate = Score 8-9
 NOW ANALYZE THIS MINING/FINANCIAL DATASET:
 """
 
-            # Get LLM analysis
-            response = self.llm.invoke([HumanMessage(content=analysis_prompt)])
+            # Get LLM analysis using system + user messages (industry best practice)
+            response = self.llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=analysis_prompt)
+            ])
             
             # Parse the enhanced response
             content = response.content.strip()
