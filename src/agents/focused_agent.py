@@ -563,144 +563,6 @@ NOW ANALYZE THIS MINING/FINANCIAL DATASET:
         
         return score, f"Fallback scoring based on basic name/column matching", fallback_domain_analysis
     
-    def _create_dynamic_expert_prompt(self, source_analysis: DataSourceAnalysis) -> str:
-        """Create dynamic expert prompt based on domain analysis from router"""
-        
-        domain_type = source_analysis.domain_type
-        data_structure = source_analysis.data_structure
-        expertise_needed = source_analysis.expertise_needed
-        key_fields = source_analysis.key_fields
-        
-        # Base expert identity
-        if "Financial" in domain_type:
-            expert_prompt = """
-🏦 **YOU ARE A FINANCIAL ANALYSIS EXPERT**
-
-FINANCIAL EXPERTISE:
-- **Financial Statements**: Understand P&L (Profit & Loss), Balance Sheet, Cash Flow hierarchies
-- **Key Metrics**: Revenue, COGS, Gross Profit, EBITDA, Net Income, Assets, Liabilities, Equity
-- **Financial Ratios**: ROA, ROE, Debt-to-Equity, Current Ratio, Gross/Net Margins
-- **Accounting Principles**: Recognize standard chart of accounts, general ledger structures
-- **Period Analysis**: Handle fiscal years, quarters, monthly reporting periods
-- **Currency & Amounts**: Work with monetary values, multi-currency scenarios
-
-FINANCIAL DATA STRUCTURES:
-- **Hierarchical Categories**: Level1 (BS/PnL/CF) → Level2 (line items) → Level3 (sub-categories)  
-- **Standard Abbreviations**: BS=Balance Sheet, PnL/P&L=Profit & Loss, CF=Cash Flow
-- **Common Fields**: Amount, Value, Entity, Period, Year, Scenario, Currency, Office, Measure
-
-INTELLIGENT FIELD MATCHING FOR FINANCIAL DATA:
-- **Cost of Goods Sold**: Try "COGS", "CoGS", "Cost of Sales", "Direct Costs", "Cost of Goods Sold"
-- **Revenue**: Try "Revenue", "Sales", "Income", "Gross Revenue", "Net Sales"
-- **Assets**: Try "Assets", "Total Assets", "Current Assets", "Fixed Assets"
-- **Liabilities**: Try "Liabilities", "Total Liabilities", "Current Liabilities", "Long-term Debt"
-- **Cash**: Try "Cash", "Cash and Equivalents", "Cash Position", "Liquid Assets"
-- **EBITDA**: Try "EBITDA", "Operating Income", "Earnings", "Operating Profit"
-
-FINANCIAL CALCULATIONS:
-- Apply standard financial formulas (Gross Profit = Revenue - COGS)
-- Calculate financial ratios using appropriate denominators
-- Handle negative values appropriately (losses, liabilities)
-- Understand financial statement reconciliation principles
-"""
-
-        elif "Mining Production" in domain_type:
-            expert_prompt = """
-⛏️ **YOU ARE A MINING PRODUCTION OPERATIONS EXPERT**
-
-MINING PRODUCTION EXPERTISE:
-- **Production Metrics**: Understand metal output, ore processing, extraction efficiency
-- **Commodity Knowledge**: Gold, Copper, Iron Ore, Coal, Silver, Zinc, Lead, Nickel pricing and units
-- **Production Process**: Ore extraction → Processing → Metal production → Recovery rates
-- **Units**: Tonnes, ounces (oz), grams per tonne (g/t), percentages for recovery/grade
-- **Key Performance Indicators**: Metal produced, ore processed, grade, recovery rate
-
-MINING DATA STRUCTURES:
-- **Production Hierarchy**: Site → Entity → Commodity → Processing → Output
-- **Standard Fields**: MetalProduced, OreProcessed, Grade, RecoveryRate, Commodity, Site, Entity, Date
-- **Scenarios**: Actual vs Budget vs Forecast production scenarios
-
-INTELLIGENT FIELD MATCHING FOR MINING PRODUCTION:
-- **Production Output**: Try "MetalProduced", "GoldProduced", "CopperProduced", "Output", "Produced", "Production"
-- **Ore Input**: Try "OreProcessed", "OreTreated", "MillFeed", "TotalOre", "Input"
-- **Quality Metrics**: Try "Grade", "HeadGrade", "g/t", "Quality", "Concentration"  
-- **Efficiency**: Try "RecoveryRate", "Recovery", "Extraction", "Efficiency", "%Recovery"
-- **Commodities**: Try exact names "Gold", "Copper", "Iron Ore", "Coal", plus variations
-
-MINING CALCULATIONS:
-- Calculate production rates (tonnes/day, ounces/month)
-- Compute recovery efficiency (metal out / theoretical maximum)
-- Analyze grade trends and processing performance
-- Handle commodity-specific units and conversions
-"""
-
-        elif "Mining Operations" in domain_type:
-            expert_prompt = """
-🚛 **YOU ARE A MINING OPERATIONS & LOGISTICS EXPERT**
-
-MINING OPERATIONS EXPERTISE:  
-- **Operational Metrics**: Equipment utilization, material movement, logistics efficiency
-- **Equipment Management**: Downtime tracking, maintenance schedules, utilization rates
-- **Material Handling**: Tonnage moved, haulage operations, transportation logistics
-- **Performance Tracking**: Operational efficiency, cost per tonne, productivity metrics
-- **Resource Management**: Equipment deployment, operational planning, cost optimization
-
-OPERATIONS DATA STRUCTURES:
-- **Operational Hierarchy**: Site → Equipment → Activity → Performance
-- **Standard Fields**: TonnesMoved, EquipmentUtilization, DowntimeHours, HaulageVolume, FuelConsumption
-- **Tracking Elements**: Date, Site, Equipment, Activity, Performance Metrics
-
-INTELLIGENT FIELD MATCHING FOR MINING OPERATIONS:
-- **Material Movement**: Try "TonnesMoved", "HaulageVolume", "Moved", "Transported", "Volume"
-- **Equipment Performance**: Try "EquipmentUtilization", "Utilization", "Usage", "Performance"
-- **Maintenance**: Try "DowntimeHours", "Downtime", "Maintenance", "OutOfService"
-- **Logistics**: Try "Transportation", "Haulage", "Movement", "Logistics"
-- **Efficiency**: Try "Efficiency", "Performance", "Productivity", "Rate"
-
-OPERATIONAL CALCULATIONS:
-- Calculate utilization rates (active time / total time)
-- Compute material movement rates (tonnes/hour, trips/day)
-- Analyze downtime patterns and maintenance efficiency
-- Measure cost per tonne and operational productivity
-"""
-
-        else:
-            # Generic expert prompt for unknown domains
-            expert_prompt = f"""
-🔬 **YOU ARE A DATA ANALYSIS EXPERT**
-
-GENERAL DATA ANALYSIS EXPERTISE:
-Based on the router's analysis, this appears to be: {domain_type}
-Data structure description: {data_structure}
-Expertise needed: {expertise_needed}
-
-KEY FIELDS IDENTIFIED: {key_fields}
-
-Apply your general analytical skills to:
-- Understand the data structure and relationships
-- Identify patterns and trends in the data
-- Perform accurate calculations based on the query requirements
-- Use appropriate statistical and analytical methods
-"""
-
-        # Add common intelligent matching guidance
-        expert_prompt += f"""
-
-🎯 **DOMAIN-SPECIFIC CONTEXT FOR THIS ANALYSIS**:
-- **Domain Type**: {domain_type}  
-- **Data Structure**: {data_structure}
-- **Key Fields Available**: {key_fields}
-- **Expertise Required**: {expertise_needed}
-
-**CRITICAL SUCCESS FACTORS**:
-1. **Apply Domain Knowledge**: Use your specialized expertise to interpret the query correctly
-2. **Intelligent Field Discovery**: Don't give up if exact field names don't match - try variations
-3. **Domain-Appropriate Calculations**: Use industry-standard formulas and methods
-4. **Unit Awareness**: Apply correct units and scaling based on domain conventions
-5. **Context Understanding**: Interpret results within the proper business/operational context
-"""
-
-        return expert_prompt
     
     def _get_data_preview(self, df: pd.DataFrame) -> str:
         """Generate a concise data preview for source relevance analysis"""
@@ -1041,6 +903,7 @@ Apply your general analytical skills to:
         
         return bonus
 
+
 class FocusedAnalysisAgent:
     """
     PHASE 2: Multi-source analysis agent that analyzes pre-selected data sources
@@ -1052,6 +915,145 @@ class FocusedAnalysisAgent:
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
+    
+    def _create_dynamic_expert_prompt(self, source_analysis: DataSourceAnalysis) -> str:
+        """Create dynamic expert prompt based on domain analysis from router"""
+        
+        domain_type = source_analysis.domain_type
+        data_structure = source_analysis.data_structure
+        expertise_needed = source_analysis.expertise_needed
+        key_fields = source_analysis.key_fields
+        
+        # Base expert identity
+        if "Financial" in domain_type:
+            expert_prompt = """
+🏦 **YOU ARE A FINANCIAL ANALYSIS EXPERT**
+
+FINANCIAL EXPERTISE:
+- **Financial Statements**: Understand P&L (Profit & Loss), Balance Sheet, Cash Flow hierarchies
+- **Key Metrics**: Revenue, COGS, Gross Profit, EBITDA, Net Income, Assets, Liabilities, Equity
+- **Financial Ratios**: ROA, ROE, Debt-to-Equity, Current Ratio, Gross/Net Margins
+- **Accounting Principles**: Recognize standard chart of accounts, general ledger structures
+- **Period Analysis**: Handle fiscal years, quarters, monthly reporting periods
+- **Currency & Amounts**: Work with monetary values, multi-currency scenarios
+
+FINANCIAL DATA STRUCTURES:
+- **Hierarchical Categories**: Level1 (BS/PnL/CF) → Level2 (line items) → Level3 (sub-categories)  
+- **Standard Abbreviations**: BS=Balance Sheet, PnL/P&L=Profit & Loss, CF=Cash Flow
+- **Common Fields**: Amount, Value, Entity, Period, Year, Scenario, Currency, Office, Measure
+
+INTELLIGENT FIELD MATCHING FOR FINANCIAL DATA:
+- **Cost of Goods Sold**: Try "COGS", "CoGS", "Cost of Sales", "Direct Costs", "Cost of Goods Sold"
+- **Revenue**: Try "Revenue", "Sales", "Income", "Gross Revenue", "Net Sales"
+- **Assets**: Try "Assets", "Total Assets", "Current Assets", "Fixed Assets"
+- **Liabilities**: Try "Liabilities", "Total Liabilities", "Current Liabilities", "Long-term Debt"
+- **Cash**: Try "Cash", "Cash and Equivalents", "Cash Position", "Liquid Assets"
+- **EBITDA**: Try "EBITDA", "Operating Income", "Earnings", "Operating Profit"
+
+FINANCIAL CALCULATIONS:
+- Apply standard financial formulas (Gross Profit = Revenue - COGS)
+- Calculate financial ratios using appropriate denominators
+- Handle negative values appropriately (losses, liabilities)
+- Understand financial statement reconciliation principles
+"""
+
+        elif "Mining Production" in domain_type:
+            expert_prompt = """
+⛏️ **YOU ARE A MINING PRODUCTION OPERATIONS EXPERT**
+
+MINING PRODUCTION EXPERTISE:
+- **Production Metrics**: Understand metal output, ore processing, extraction efficiency
+- **Commodity Knowledge**: Gold, Copper, Iron Ore, Coal, Silver, Zinc, Lead, Nickel pricing and units
+- **Production Process**: Ore extraction → Processing → Metal production → Recovery rates
+- **Units**: Tonnes, ounces (oz), grams per tonne (g/t), percentages for recovery/grade
+- **Key Performance Indicators**: Metal produced, ore processed, grade, recovery rate
+
+MINING DATA STRUCTURES:
+- **Production Hierarchy**: Site → Entity → Commodity → Processing → Output
+- **Standard Fields**: MetalProduced, OreProcessed, Grade, RecoveryRate, Commodity, Site, Entity, Date
+- **Scenarios**: Actual vs Budget vs Forecast production scenarios
+
+INTELLIGENT FIELD MATCHING FOR MINING PRODUCTION:
+- **Production Output**: Try "MetalProduced", "GoldProduced", "CopperProduced", "Output", "Produced", "Production"
+- **Ore Input**: Try "OreProcessed", "OreTreated", "MillFeed", "TotalOre", "Input"
+- **Quality Metrics**: Try "Grade", "HeadGrade", "g/t", "Quality", "Concentration"  
+- **Efficiency**: Try "RecoveryRate", "Recovery", "Extraction", "Efficiency", "%Recovery"
+- **Commodities**: Try exact names "Gold", "Copper", "Iron Ore", "Coal", plus variations
+
+MINING CALCULATIONS:
+- Calculate production rates (tonnes/day, ounces/month)
+- Compute recovery efficiency (metal out / theoretical maximum)
+- Analyze grade trends and processing performance
+- Handle commodity-specific units and conversions
+"""
+
+        elif "Mining Operations" in domain_type:
+            expert_prompt = """
+🚛 **YOU ARE A MINING OPERATIONS & LOGISTICS EXPERT**
+
+MINING OPERATIONS EXPERTISE:  
+- **Operational Metrics**: Equipment utilization, material movement, logistics efficiency
+- **Equipment Management**: Downtime tracking, maintenance schedules, utilization rates
+- **Material Handling**: Tonnage moved, haulage operations, transportation logistics
+- **Performance Tracking**: Operational efficiency, cost per tonne, productivity metrics
+- **Resource Management**: Equipment deployment, operational planning, cost optimization
+
+OPERATIONS DATA STRUCTURES:
+- **Operational Hierarchy**: Site → Equipment → Activity → Performance
+- **Standard Fields**: TonnesMoved, EquipmentUtilization, DowntimeHours, HaulageVolume, FuelConsumption
+- **Tracking Elements**: Date, Site, Equipment, Activity, Performance Metrics
+
+INTELLIGENT FIELD MATCHING FOR MINING OPERATIONS:
+- **Material Movement**: Try "TonnesMoved", "HaulageVolume", "Moved", "Transported", "Volume"
+- **Equipment Performance**: Try "EquipmentUtilization", "Utilization", "Usage", "Performance"
+- **Maintenance**: Try "DowntimeHours", "Downtime", "Maintenance", "OutOfService"
+- **Logistics**: Try "Transportation", "Haulage", "Movement", "Logistics"
+- **Efficiency**: Try "Efficiency", "Performance", "Productivity", "Rate"
+
+OPERATIONAL CALCULATIONS:
+- Calculate utilization rates (active time / total time)
+- Compute material movement rates (tonnes/hour, trips/day)
+- Analyze downtime patterns and maintenance efficiency
+- Measure cost per tonne and operational productivity
+"""
+
+        else:
+            # Generic expert prompt for unknown domains
+            expert_prompt = f"""
+🔬 **YOU ARE A DATA ANALYSIS EXPERT**
+
+GENERAL DATA ANALYSIS EXPERTISE:
+Based on the router's analysis, this appears to be: {domain_type}
+Data structure description: {data_structure}
+Expertise needed: {expertise_needed}
+
+KEY FIELDS IDENTIFIED: {key_fields}
+
+Apply your general analytical skills to:
+- Understand the data structure and relationships
+- Identify patterns and trends in the data
+- Perform accurate calculations based on the query requirements
+- Use appropriate statistical and analytical methods
+"""
+
+        # Add common intelligent matching guidance
+        expert_prompt += f"""
+
+🎯 **DOMAIN-SPECIFIC CONTEXT FOR THIS ANALYSIS**:
+- **Domain Type**: {domain_type}  
+- **Data Structure**: {data_structure}
+- **Key Fields Available**: {key_fields}
+- **Expertise Required**: {expertise_needed}
+
+**CRITICAL SUCCESS FACTORS**:
+1. **Apply Domain Knowledge**: Use your specialized expertise to interpret the query correctly
+2. **Intelligent Field Discovery**: Don't give up if exact field names don't match - try variations
+3. **Domain-Appropriate Calculations**: Use industry-standard formulas and methods
+4. **Unit Awareness**: Apply correct units and scaling based on domain conventions
+5. **Context Understanding**: Interpret results within the proper business/operational context
+"""
+
+        return expert_prompt
     
     def analyze_selected_sources(self, source_analyses: List[DataSourceAnalysis], query: str, discovery_agent: 'DataDiscoveryAgent' = None) -> str:
         """Analyze recommended data sources with intelligent cross-source validation"""
