@@ -1,25 +1,35 @@
 from typing import Dict, Any, List
 import os
-from .focused_agent import FocusedAgenticWorkflow
+from .rag_enhanced_workflow import RAGEnhancedWorkflow
 
 class PureAgenticWorkflow:
     """
-    Pure agentic workflow using intelligent reasoning agents.
-    No keywords, no hardcoded rules - just pure AI reasoning.
+    Pure agentic workflow using RAG-enhanced discovery + intelligent analysis.
+    Fast vector-based discovery with expert domain analysis.
     """
     
-    def __init__(self):
-        print("🚀 Initializing Focused Two-Phase Agent...")
-        
-        # Use focused two-phase workflow for optimal performance
-        self.focused_workflow = FocusedAgenticWorkflow()
+    def __init__(self, use_rag: bool = True, rebuild_index: bool = False):
+        if use_rag:
+            print("Initializing RAG-Enhanced Agentic Workflow...")
+            
+            # Use RAG-enhanced workflow for maximum performance
+            self.rag_workflow = RAGEnhancedWorkflow(rebuild_index=rebuild_index)
+            self.use_rag = True
+            
+            print("RAG-Enhanced Workflow initialized successfully!")
+            print("Flow: Vector Discovery -> Schema Selection -> Expert Analysis")
+        else:
+            print("🚀 Initializing Legacy Focused Two-Phase Agent...")
+            
+            # Fallback to old system if needed
+            from .focused_agent import FocusedAgenticWorkflow
+            self.focused_workflow = FocusedAgenticWorkflow()
+            self.use_rag = False
+            
+            print("✅ Legacy Focused Agent initialized!")
         
         # Verify data sources are available
         self.data_sources = self._verify_data_sources()
-        
-        print("✅ Focused Two-Phase Agent initialized successfully!")
-        print(f"📊 Discovered {len(self.data_sources)} data sources")
-        print("🎯 Agent features: Discovery → Analysis, No sheet bouncing, Concrete answers")
     
     def _verify_data_sources(self) -> Dict[str, bool]:
         """Verify which data sources are available"""
@@ -63,30 +73,51 @@ class PureAgenticWorkflow:
         return sources
     
     def process_query(self, query: str) -> str:
-        """Process query using focused two-phase approach"""
-        print(f"🎯 Focused Two-Phase Agent processing query: {query}")
+        """Process query using RAG-enhanced or legacy approach"""
         
         try:
-            # Use the focused two-phase workflow for optimal performance
-            response = self.focused_workflow.process_query(query)
-            
-            print("✅ Focused Agent completed two-phase analysis")
-            return response
+            if self.use_rag:
+                # Use RAG-enhanced workflow for maximum performance
+                response = self.rag_workflow.process_query(query)
+                print("✅ RAG-Enhanced Agent completed analysis")
+                return response
+            else:
+                # Fallback to legacy focused workflow
+                print(f"🎯 Legacy Focused Agent processing query: {query}")
+                response = self.focused_workflow.process_query(query)
+                print("✅ Legacy Focused Agent completed analysis")
+                return response
             
         except Exception as e:
-            error_msg = f"🎯 Focused Agent error: {str(e)}"
+            system_type = "RAG-Enhanced" if self.use_rag else "Legacy Focused"
+            error_msg = f"❌ {system_type} Agent error: {str(e)}"
             print(error_msg)
             return error_msg
     
     def get_system_status(self) -> str:
-        """Get the status of the focused two-phase system"""
-        # Use the focused workflow's status method
-        return self.focused_workflow.get_system_status() + f"\n\n**Data Sources Verified**: {len(self.data_sources)} sources discovered"
+        """Get the status of the current system"""
+        if self.use_rag:
+            # Use RAG-enhanced workflow status
+            return self.rag_workflow.get_system_status() + f"\n\n**Environment Sources Verified**: {len(self.data_sources)} source types available"
+        else:
+            # Use legacy workflow status
+            return self.focused_workflow.get_system_status() + f"\n\n**Data Sources Verified**: {len(self.data_sources)} sources discovered"
     
     def get_available_commands(self) -> str:
-        """Get information about what the focused two-phase system can do"""
-        # Use the focused workflow's commands method
-        return self.focused_workflow.get_available_commands()
+        """Get information about what the current system can do"""
+        if self.use_rag:
+            # Use RAG-enhanced workflow commands
+            return self.rag_workflow.get_available_commands()
+        else:
+            # Use legacy workflow commands
+            return self.focused_workflow.get_available_commands()
+    
+    def rebuild_rag_index(self) -> str:
+        """Rebuild RAG index (only available in RAG mode)"""
+        if self.use_rag:
+            return self.rag_workflow.rebuild_index()
+        else:
+            return "❌ RAG index rebuild only available in RAG mode. Initialize with use_rag=True."
     
     def get_data_info(self) -> str:
         """Get information about available data (discovered dynamically)"""
