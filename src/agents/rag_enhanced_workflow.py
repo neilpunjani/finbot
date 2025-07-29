@@ -17,6 +17,54 @@ class RAGEnhancedExcelAgent:
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
+        # Caching system
+        self._dataframe_cache = {}  # Store DataFrames in memory
+        self._file_timestamps = {}  # Track when files were last modified
+    
+    def _get_cached_dataframe(self, file_path: str, sheet_name: str = None) -> pd.DataFrame:
+        """Get DataFrame from cache or load fresh if file was modified"""
+        
+        cache_key = f"{file_path}:{sheet_name or 'default'}"
+        
+        try:
+            # Check when the file was last modified
+            current_mtime = os.path.getmtime(file_path)
+            cached_mtime = self._file_timestamps.get(cache_key, 0)
+            
+            # Load fresh data if file is new or was modified
+            if cache_key not in self._dataframe_cache or current_mtime > cached_mtime:
+                print(f"   📁 Loading fresh data from {os.path.basename(file_path)} (file modified or first load)")
+                
+                if sheet_name:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                    data_context = f"Excel sheet '{sheet_name}'"
+                else:
+                    df = pd.read_csv(file_path)
+                    data_context = f"CSV file '{os.path.basename(file_path)}'"
+                
+                # Cache the DataFrame and timestamp
+                self._dataframe_cache[cache_key] = df
+                self._file_timestamps[cache_key] = current_mtime
+                
+                print(f"   💾 Cached {data_context}: {df.shape[0]} rows, {df.shape[1]} columns")
+            else:
+                print(f"   ⚡ Using cached data for {os.path.basename(file_path)} (no changes detected)")
+            
+            return self._dataframe_cache[cache_key]
+            
+        except Exception as e:
+            print(f"   ❌ Cache error for {file_path}: {str(e)}")
+            # Fallback to direct loading
+            if sheet_name:
+                return pd.read_excel(file_path, sheet_name=sheet_name)
+            else:
+                return pd.read_csv(file_path)
+    
+    def clear_cache(self):
+        """Manually clear the DataFrame cache"""
+        self._dataframe_cache.clear()
+        self._file_timestamps.clear()
+        print("   🔄 DataFrame cache cleared")
     
     def analyze(self, source_candidate: SourceCandidate, query: str, expertise: str = None) -> str:
         """Analyze using pre-selected source with domain expertise"""
@@ -24,17 +72,15 @@ class RAGEnhancedExcelAgent:
         schema = source_candidate.schema
         
         try:
-            # Load the specific sheet/file
+            # Use cached DataFrame (loads fresh only if file was modified)
+            df = self._get_cached_dataframe(schema.file_path, schema.sheet_name)
+            
             if schema.sheet_name:
-                # Excel sheet
-                df = pd.read_excel(schema.file_path, sheet_name=schema.sheet_name)
                 data_context = f"Excel sheet '{schema.sheet_name}'"
             else:
-                # CSV file
-                df = pd.read_csv(schema.file_path)
                 data_context = f"CSV file '{os.path.basename(schema.file_path)}'"
             
-            print(f"   📊 Loaded {data_context}: {df.shape[0]} rows, {df.shape[1]} columns")
+            print(f"   📊 Using {data_context}: {df.shape[0]} rows, {df.shape[1]} columns")
             
             # Generate expertise-based prompt (use provided expertise or fallback)
             final_expertise = expertise or schema.domain_info.get('expertise_needed', 'financial_analyst')
@@ -143,15 +189,43 @@ class RAGEnhancedExcelAgent:
             expert_prompt += f"""
 - This is financial data from VW_PBI Excel sheet with hierarchical structure (Level1/Level2/Level3)
 - The DataFrame 'df' contains {schema.row_count:,} rows of financial data - work directly with 'df'
-- EXPLORE FIRST: Check df['Level1'].unique(), df['Level2'].unique(), df['Level3'].unique() to understand the hierarchy
-- Revenue/Income data could be in any level - search across Level1, Level2, Level3, and Account columns
-- For financial ratios, explore the Balance Sheet structure first before filtering
-- Cash ratio = Cash and cash equivalents / Current Liabilities (find these terms in the data)
-- Current ratio = Current Assets / Current Liabilities (find these terms in the data)
-- Example exploration: df[df['Level1'].str.contains('Revenue|Income', case=False, na=False)] 
-- Use hierarchical filtering with Level1/Level2/Level3 columns based on ACTUAL values found
-- Filter by Year column for specific periods
-- THE DATA IS ALREADY LOADED - do not try to read any files"""
+
+**FINANCIAL ANALYSIS PRINCIPLES**:
+1. **ALWAYS EXPLORE FIRST**: Check df['Level1'].unique(), df['Level2'].unique(), df['Level3'].unique()
+2. **COMPREHENSIVE CALCULATIONS**: 
+   - Total Debt = Current Liabilities + Non-Current Liabilities + Long-term Debt
+   - Total Assets = Current Assets + Non-Current Assets (or Fixed Assets)
+   - Total Equity = Share Capital + Retained Earnings + Other Equity components
+   - Revenue = All revenue streams (Operating Revenue + Other Revenue)
+   - Total Expenses = All expense categories combined
+
+**STANDARD FINANCIAL RATIOS** (find ALL required components):
+- Debt-to-Equity = Total Debt / Total Equity
+- Current Ratio = Current Assets / Current Liabilities  
+- Cash Ratio = Cash & Cash Equivalents / Current Liabilities
+- ROA = Net Income / Total Assets
+- ROE = Net Income / Total Equity
+- Gross Profit Margin = (Revenue - COGS) / Revenue
+
+**SEARCH STRATEGY**:
+- Search across Level1, Level2, Level3, Account columns for financial terms
+- Use partial matching: .str.contains('Debt|Liability|Payable', case=False, na=False)
+- Include ALL relevant line items (don't miss Non-Current, Long-term, etc.)
+- Verify completeness by checking what you found vs what should exist
+
+**ADAPTIVE CALCULATION STRATEGY**:
+1. **FIRST**: Try to find the exact value directly (e.g., search for "Net Income", "Total Debt", etc.)
+2. **IF NOT FOUND**: Calculate from components using the hierarchical structure
+3. **EXAMPLE**: 
+   - Net Income: Look for direct "Net Income" line item
+   - If not found: Revenue - All Expenses - Interest - Tax
+   - Total Debt: Look for "Total Debt" line item  
+   - If not found: Current Liabilities + Non-Current Liabilities + Long-term Debt
+4. **ALWAYS**: Show both what you found directly AND what you calculated
+5. **VERIFY**: Cross-check calculated values against any direct line items if both exist
+
+**MANDATORY**: For any ratio, identify and include ALL components, not just partial amounts.
+THE DATA IS ALREADY LOADED - do not try to read any files"""
             
         elif domain_type == "mining":
             expert_prompt += """
@@ -239,6 +313,41 @@ class RAGEnhancedCSVAgent:
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
+        # Caching system (same as Excel agent)
+        self._dataframe_cache = {}
+        self._file_timestamps = {}
+    
+    def _get_cached_dataframe(self, file_path: str) -> pd.DataFrame:
+        """Get CSV DataFrame from cache or load fresh if file was modified"""
+        
+        cache_key = f"{file_path}:csv"
+        
+        try:
+            current_mtime = os.path.getmtime(file_path)
+            cached_mtime = self._file_timestamps.get(cache_key, 0)
+            
+            if cache_key not in self._dataframe_cache or current_mtime > cached_mtime:
+                print(f"   📁 Loading fresh CSV data from {os.path.basename(file_path)}")
+                df = pd.read_csv(file_path)
+                
+                self._dataframe_cache[cache_key] = df
+                self._file_timestamps[cache_key] = current_mtime
+                
+                print(f"   💾 Cached CSV: {df.shape[0]} rows, {df.shape[1]} columns")
+            else:
+                print(f"   ⚡ Using cached CSV data for {os.path.basename(file_path)}")
+            
+            return self._dataframe_cache[cache_key]
+            
+        except Exception as e:
+            print(f"   ❌ CSV cache error: {str(e)}")
+            return pd.read_csv(file_path)
+    
+    def clear_cache(self):
+        """Manually clear the CSV DataFrame cache"""
+        self._dataframe_cache.clear()
+        self._file_timestamps.clear()
+        print("   🔄 CSV DataFrame cache cleared")
     
     def analyze(self, source_candidate: SourceCandidate, query: str, expertise: str = None) -> str:
         """Analyze CSV source with domain expertise"""
@@ -246,10 +355,10 @@ class RAGEnhancedCSVAgent:
         schema = source_candidate.schema
         
         try:
-            # Load CSV file
-            df = pd.read_csv(schema.file_path)
+            # Use cached CSV DataFrame
+            df = self._get_cached_dataframe(schema.file_path)
             
-            print(f"   📄 Loaded CSV: {os.path.basename(schema.file_path)} ({df.shape[0]} rows, {df.shape[1]} cols)")
+            print(f"   📄 Using CSV: {os.path.basename(schema.file_path)} ({df.shape[0]} rows, {df.shape[1]} cols)")
             
             # Generate expertise-based prompt (use provided expertise or fallback)
             final_expertise = expertise or schema.domain_info.get('expertise_needed', 'data_analyst')
@@ -542,6 +651,17 @@ RESPONSE:"""
         """Force rebuild the RAG index"""
         try:
             self.rag_discovery.rebuild_index()
-            return "✅ RAG index rebuilt successfully! All data sources re-indexed."
+            # Also clear DataFrame caches when rebuilding
+            self.clear_all_caches()
+            return "✅ RAG index rebuilt successfully! All data sources re-indexed and caches cleared."
         except Exception as e:
             return f"❌ Failed to rebuild index: {str(e)}"
+    
+    def clear_all_caches(self) -> str:
+        """Clear all DataFrame caches for fresh data loading"""
+        try:
+            self.excel_agent.clear_cache()
+            self.csv_agent.clear_cache()
+            return "✅ All DataFrame caches cleared! Next queries will load fresh data."
+        except Exception as e:
+            return f"❌ Failed to clear caches: {str(e)}"
