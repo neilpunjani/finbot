@@ -5,6 +5,7 @@ FastAPI REST API for Finaptive AI Chatbot
 """
 import sys
 import os
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -44,6 +45,7 @@ app.add_middleware(
 
 # Global workflow instance
 workflow = None
+workflow_initializing = False
 
 class ChatMessage(BaseModel):
     message: str
@@ -59,16 +61,35 @@ class SystemStatus(BaseModel):
     available_sources: list
     system_info: str
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the pure agentic workflow on startup"""
-    global workflow
+async def initialize_workflow():
+    """Initialize the workflow lazily when first needed"""
+    global workflow, workflow_initializing
+    
+    if workflow is not None:
+        return workflow
+    
+    if workflow_initializing:
+        # Another request is already initializing, wait for it
+        while workflow_initializing and workflow is None:
+            await asyncio.sleep(0.1)
+        return workflow
+    
     try:
+        workflow_initializing = True
+        print("🚀 Initializing Pure Agentic AI workflow...")
         workflow = PureAgenticWorkflow()
         print("✅ Pure Agentic AI workflow initialized successfully!")
+        return workflow
     except Exception as e:
         print(f"❌ Failed to initialize pure agentic workflow: {str(e)}")
         raise
+    finally:
+        workflow_initializing = False
+
+@app.on_event("startup")
+async def startup_event():
+    """API startup - don't initialize workflow yet"""
+    print("🌟 Finaptive AI API started - workflow will initialize on first request")
 
 @app.get("/")
 async def root():
@@ -84,14 +105,35 @@ async def root():
 @app.get("/status", response_model=SystemStatus)
 async def get_status():
     """Get system status and available data sources"""
+    global workflow_initializing
+    
+    # If workflow doesn't exist and isn't initializing, start initialization
+    if workflow is None and not workflow_initializing:
+        # Don't await - let it initialize in background
+        asyncio.create_task(initialize_workflow())
+    
+    # If still initializing, return loading status
+    if workflow_initializing or (workflow and hasattr(workflow, 'is_loading') and workflow.is_loading):
+        loading_message = "Initializing system..."
+        if workflow and hasattr(workflow, 'loading_status'):
+            loading_message = workflow.loading_status
+        
+        return SystemStatus(
+            status="loading",
+            available_sources=[],
+            system_info=f"System Loading: {loading_message}"
+        )
+    
+    # If workflow is None and not initializing, it failed
     if workflow is None:
-        raise HTTPException(status_code=503, detail="Pure agentic workflow not initialized")
+        raise HTTPException(status_code=503, detail="Workflow initialization failed")
     
     try:
+        # System is ready
         status_info = workflow.get_system_status()
         return SystemStatus(
             status="active",
-            available_sources=["Adaptive Discovery", "Query Complexity Analysis", "ReAct Cross-Checking", "Multi-Sheet Validation", "Calculation Transparency", "Intelligent Selection"],
+            available_sources=["RAG Discovery", "Excel Analysis", "CSV Analysis", "Financial Calculations", "Mining Operations", "HR Analytics"],
             system_info=status_info
         )
     except Exception as e:
@@ -100,8 +142,8 @@ async def get_status():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(message: ChatMessage):
     """Process a chat message and return response"""
-    if workflow is None:
-        raise HTTPException(status_code=503, detail="Pure agentic workflow not initialized")
+    # Ensure workflow is initialized
+    current_workflow = await initialize_workflow()
     
     if not message.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
@@ -109,11 +151,11 @@ async def chat(message: ChatMessage):
     try:
         # Handle special commands
         if message.message.lower() in ['help', 'examples']:
-            response = workflow.get_available_commands()
+            response = current_workflow.get_available_commands()
         elif message.message.lower() in ['status', 'system']:
-            response = workflow.get_system_status()
+            response = current_workflow.get_system_status()
         else:
-            response = workflow.process_query(message.message)
+            response = current_workflow.process_query(message.message)
         
         return ChatResponse(
             response=response,

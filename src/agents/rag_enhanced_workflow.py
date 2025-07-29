@@ -497,12 +497,27 @@ class RAGEnhancedWorkflow:
     def __init__(self, rebuild_index: bool = False):
         print("🚀 Initializing RAG-Enhanced Workflow...")
         
+        # Track loading state
+        self.is_loading = True
+        self.loading_status = "Initializing system..."
+        
         # Initialize RAG discovery
+        self.loading_status = "Building vector index..."
         self.rag_discovery = RAGDiscoveryAgent(rebuild_index=rebuild_index)
         
         # Initialize enhanced agents
+        self.loading_status = "Preparing AI agents..."
         self.excel_agent = RAGEnhancedExcelAgent()
         self.csv_agent = RAGEnhancedCSVAgent()
+        
+        # Preload common data sources at startup
+        self.loading_status = "Preloading data sources..."
+        print("📊 Preloading data sources...")
+        self._preload_data_sources()
+        
+        # Mark as ready
+        self.is_loading = False
+        self.loading_status = "Ready"
         
         print("✅ RAG-Enhanced Workflow ready!")
         print("🎯 Flow: Query → RAG Discovery → Schema-Aware Selection → Expert Analysis")
@@ -620,6 +635,38 @@ class RAGEnhancedWorkflow:
         }
         
         return expertise_map.get(domain_type, "data analyst")
+    
+    def _preload_data_sources(self):
+        """Preload common data sources at startup for faster query responses"""
+        
+        preload_count = 0
+        
+        try:
+            # Preload VW_PBI Excel sheet (most common for financial queries)
+            excel_path = os.getenv("EXCEL_FILE_PATH")
+            if excel_path and os.path.exists(excel_path):
+                self.loading_status = "Loading Excel data (VW_PBI)..."
+                print(f"   📈 Loading VW_PBI Excel data...")
+                self.excel_agent._get_cached_dataframe(excel_path, "VW_PBI")
+                preload_count += 1
+            
+            # Preload common CSV files
+            csv_dir = os.getenv("CSV_DIRECTORY", "data/csv")
+            if os.path.exists(csv_dir):
+                csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
+                for i, csv_file in enumerate(csv_files[:3], 1):  # Preload top 3 CSV files
+                    self.loading_status = f"Loading CSV files ({i}/3)..."
+                    csv_path = os.path.join(csv_dir, csv_file)
+                    print(f"   📄 Loading {csv_file}...")
+                    self.csv_agent._get_cached_dataframe(csv_path)
+                    preload_count += 1
+            
+            self.loading_status = "Finalizing setup..."
+            print(f"   ✅ Preloaded {preload_count} data sources into cache")
+            
+        except Exception as e:
+            print(f"   ⚠️ Preloading warning: {str(e)} (will load on-demand)")
+            self.loading_status = f"Warning: {str(e)}"
 
     def rebuild_index(self) -> str:
         """Force rebuild the RAG index"""
