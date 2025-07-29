@@ -519,9 +519,10 @@ class RAGEnhancedWorkflow:
             if not source_candidate:
                 return "❌ **No Data Source Found**\n\nThe system could not find any data source that contains the required information to answer your query. The available sources do not have the necessary data elements for this calculation/analysis.\n\n**Suggestion**: Try rephrasing your query or check if the required data exists in your data sources."
             
-            # PHASE 2: Generate Expertise for Query
-            expertise = self._generate_expertise(query, source_candidate.schema)
-            print(f"   👨‍💼 Generated expertise: {expertise}")
+            # PHASE 2: Use Simple Domain-Based Expertise (No LLM call needed)
+            domain_type = source_candidate.schema.domain_info.get('domain_type', 'unknown')
+            expertise = self._get_simple_expertise(domain_type)
+            print(f"   👨‍💼 Using expertise: {expertise}")
             
             # PHASE 3: Expert Analysis with Selected Source
             schema = source_candidate.schema
@@ -607,45 +608,18 @@ class RAGEnhancedWorkflow:
 3. 🎯 **Expert Analysis**: Domain-specific agent performs complex calculations
 4. ✅ **Quality Results**: Preserves all current calculation capabilities with 20x speed improvement"""
     
-    def _generate_expertise(self, query: str, schema) -> str:
-        """Generate specific expertise needed for the query"""
+    def _get_simple_expertise(self, domain_type: str) -> str:
+        """Get simple domain-based expertise without LLM call"""
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+        expertise_map = {
+            "financial": "financial analyst",
+            "mining": "mining operations analyst", 
+            "hr": "HR analyst",
+            "operational": "operations analyst",
+            "unknown": "data analyst"
+        }
         
-        prompt = f"""Based on this specific query, generate a detailed expert profile who can best analyze this data.
-
-QUERY: {query}
-DATA SOURCE: {schema.source_name}
-DOMAIN: {schema.domain_info.get('domain_type', 'unknown')}
-COLUMNS: {', '.join(schema.columns[:10])}
-
-Create a SPECIFIC expert description that includes:
-1. Base profession (financial analyst, mining engineer, etc.)
-2. Specific expertise area related to the query
-3. Relevant specialization
-
-EXAMPLES:
-- Query "cash ratio" → "Financial analyst with expertise in liquidity ratios and working capital management"
-- Query "gold production" → "Mining operations analyst specializing in precious metals extraction and production optimization"
-- Query "training hours" → "HR analyst with expertise in workforce development and training program analysis"
-- Query "debt to equity" → "Financial analyst specializing in capital structure and leverage analysis"
-
-RESPONSE FORMAT:
-Expert: [detailed expert description with specific expertise]
-
-RESPONSE:"""
-
-        try:
-            response = llm.invoke(prompt).content
-            if "Expert:" in response:
-                expert_line = [line for line in response.split('\n') if 'Expert:' in line][0]
-                expert_type = expert_line.split('Expert:')[1].strip()
-                return expert_type
-            else:
-                return "financial_analyst"  # Default fallback
-        except Exception as e:
-            print(f"⚠️ Expertise generation failed: {str(e)}")
-            return "financial_analyst"  # Safe fallback
+        return expertise_map.get(domain_type, "data analyst")
 
     def rebuild_index(self) -> str:
         """Force rebuild the RAG index"""
