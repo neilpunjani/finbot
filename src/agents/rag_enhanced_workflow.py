@@ -13,7 +13,7 @@ class RAGEnhancedExcelAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini",  # Using faster model for pandas analysis
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
@@ -309,7 +309,7 @@ class RAGEnhancedCSVAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini",  # Using faster model for pandas analysis  
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )

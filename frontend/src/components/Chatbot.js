@@ -73,6 +73,8 @@ const Chatbot = () => {
       isRetrieving: true
     };
 
+    const startTime = Date.now(); // Start timing
+    
     setMessages(prev => [...prev, userMessage, retrievingMessage]);
     setInputMessage('');
     setIsLoading(true);
@@ -83,6 +85,9 @@ const Chatbot = () => {
         session_id: 'web-session-' + Date.now()
       });
 
+      const endTime = Date.now(); // End timing
+      const processingTime = ((endTime - startTime) / 1000).toFixed(2); // Convert to seconds
+
       // Replace retrieving message with actual response
       const botMessage = {
         id: retrievingMessage.id, // Keep same ID to replace
@@ -90,6 +95,7 @@ const Chatbot = () => {
         content: response.data.response,
         timestamp: new Date(),
         sources: response.data.sources,
+        processingTime: processingTime,
         isRetrieving: false
       };
       
@@ -97,12 +103,16 @@ const Chatbot = () => {
         msg.id === retrievingMessage.id ? botMessage : msg
       ));
     } catch (error) {
+      const endTime = Date.now(); // End timing even for errors
+      const processingTime = ((endTime - startTime) / 1000).toFixed(2);
+
       // Replace retrieving message with error
       const errorMessage = {
         id: retrievingMessage.id, // Keep same ID to replace
         type: 'bot',
         content: 'Sorry, I encountered an error processing your request. Please try again.',
         timestamp: new Date(),
+        processingTime: processingTime,
         isError: true,
         isRetrieving: false
       };
@@ -183,6 +193,11 @@ const Chatbot = () => {
               </div>
               <div className="message-time">
                 {message.timestamp.toLocaleTimeString()}
+                {message.processingTime && message.type === 'bot' && (
+                  <span className="processing-time">
+                    • {message.processingTime}s
+                  </span>
+                )}
               </div>
             </div>
           </div>
