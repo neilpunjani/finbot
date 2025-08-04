@@ -101,6 +101,13 @@ class RAGEnhancedExcelAgent:
 
 **CRITICAL**: The data is ALREADY LOADED in the DataFrame variable 'df'. 
 
+**CRITICAL IMPORT REQUIREMENT**: ALWAYS start your code with these imports:
+```python
+import pandas as pd
+import numpy as np
+from datetime import datetime
+```
+
 **FORBIDDEN OPERATIONS**:
 - Do NOT use pd.read_csv(), pd.read_excel(), or any file reading functions
 - Do NOT try to read 'VW_PBI.csv' or any other file - THE DATA IS ALREADY LOADED
@@ -121,8 +128,8 @@ class RAGEnhancedExcelAgent:
                 agent_type=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,  # Enable verbose to see what's happening
                 prefix=full_prompt,
-                max_iterations=15,  # Increase iterations
-                early_stopping_method="generate",
+                max_iterations=5,  # Balanced speed vs completion - allows finishing analysis
+                # early_stopping_method="generate",  # Removed - unsupported in current LangChain version
                 allow_dangerous_code=True,  # Allow code execution for data analysis
                 # return_intermediate_steps=True  # Removed to fix API compatibility
             )
@@ -378,6 +385,13 @@ class RAGEnhancedCSVAgent:
 
 **CRITICAL**: The CSV data is ALREADY LOADED in the DataFrame variable 'df'. 
 
+**CRITICAL IMPORT REQUIREMENT**: ALWAYS start your code with these imports:
+```python
+import pandas as pd
+import numpy as np
+from datetime import datetime
+```
+
 **FORBIDDEN OPERATIONS**:
 - Do NOT use pd.read_csv(), pd.read_excel(), or any file reading functions
 - Do NOT try to read 'hr_data.csv', 'WorkforceData.csv', or any other file - THE DATA IS ALREADY LOADED
@@ -397,8 +411,8 @@ class RAGEnhancedCSVAgent:
                 agent_type=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,  # Enable verbose to see what's happening
                 prefix=full_csv_prompt,
-                max_iterations=15,  # Increase iterations
-                early_stopping_method="generate",
+                max_iterations=5,  # Balanced speed vs completion - allows finishing analysis
+                # early_stopping_method="generate",  # Removed - unsupported in current LangChain version
                 allow_dangerous_code=True,  # Allow code execution for data analysis
                 # return_intermediate_steps=True  # Removed to fix API compatibility
             )
