@@ -607,30 +607,46 @@ class RAGDiscoveryAgent:
     def _is_financial_query(self, query: str) -> bool:
         """Check if query is financial-related using LLM classification"""
         
-        classification_prompt = f"""Is this query related to financial data, accounting, or financial analysis?
+        classification_prompt = f"""You are a data analyst helping to route queries to the correct data source.
 
-Query: {query}
+QUERY: "{query}"
 
-Financial queries include:
-- Financial ratios (any ratio calculation)
-- Revenue, income, profit, loss analysis  
-- Balance sheet items (assets, liabilities, equity)
+Classify this query as either FINANCIAL or OPERATIONAL:
+
+**FINANCIAL queries** analyze financial statements, accounting data, and business performance:
+- Revenue, income, profit, loss, expenses
+- Balance sheet items (assets, liabilities, equity, cash)
+- Financial ratios (debt-to-equity, current ratio, ROE, ROA)
 - Cash flow analysis
-- Financial performance metrics
-- Accounting data analysis
-- Budget, cost, expense analysis
-- Investment returns, margins
+- Financial performance and margins
+- Budget and cost analysis
+- Examples: "What is our revenue?", "Calculate debt-to-equity ratio", "Show cash flow"
 
-Respond with only: YES or NO
+**OPERATIONAL queries** analyze business operations, production, and activities:
+- Production volumes, output, manufacturing
+- Operational metrics (throughput, efficiency, capacity)
+- Workforce data (employees, training, safety)
+- Mining operations (ore, metal production, grades)
+- Operational performance and growth
+- Examples: "What was gold production?", "Show production growth", "How many employees trained?"
 
-Response:"""
+**KEY DISTINCTION**: 
+- Revenue/profit FROM production = FINANCIAL
+- Production volumes/amounts = OPERATIONAL
+
+**YOUR TASK**: Look at what the query is actually asking for:
+- If asking for money/financial values → FINANCIAL
+- If asking for quantities/operational metrics → OPERATIONAL
+
+Respond with exactly one word: FINANCIAL or OPERATIONAL"""
 
         try:
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
             response = llm.invoke(classification_prompt).content.strip().upper()
             
-            is_financial = "YES" in response
-            print(f"   🤖 LLM Classification: {query} → {'Financial' if is_financial else 'Operational'}")
+            is_financial = "FINANCIAL" in response
+            classification_type = 'Financial' if is_financial else 'Operational'
+            print(f"   🤖 LLM Classification: '{query}' → {classification_type} (Response: {response})")
             return is_financial
             
         except Exception as e:
