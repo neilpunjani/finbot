@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 import os
+import asyncio
 from .rag_enhanced_workflow import RAGEnhancedWorkflow
 
 class PureAgenticWorkflow:
@@ -91,6 +92,30 @@ class PureAgenticWorkflow:
         except Exception as e:
             system_type = "RAG-Enhanced" if self.use_rag else "Legacy Focused"
             error_msg = f"❌ {system_type} Agent error: {str(e)}"
+            print(error_msg)
+            return error_msg
+    
+    async def process_query_async(self, query: str) -> str:
+        """PERFORMANCE OPTIMIZED: Async query processing to avoid blocking operations"""
+        
+        try:
+            if self.use_rag:
+                # Use RAG-enhanced workflow for maximum performance (run in thread pool to avoid blocking)
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(None, self.rag_workflow.process_query, query)
+                print("✅ RAG-Enhanced Agent completed async analysis")
+                return response
+            else:
+                # Fallback to legacy focused workflow (run in thread pool to avoid blocking)
+                print(f"🎯 Legacy Focused Agent processing async query: {query}")
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(None, self.focused_workflow.process_query, query)
+                print("✅ Legacy Focused Agent completed async analysis")
+                return response
+            
+        except Exception as e:
+            system_type = "RAG-Enhanced" if self.use_rag else "Legacy Focused"
+            error_msg = f"❌ {system_type} Async Agent error: {str(e)}"
             print(error_msg)
             return error_msg
     

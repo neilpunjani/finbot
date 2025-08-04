@@ -154,8 +154,11 @@ async def chat(message: ChatMessage):
             response = current_workflow.get_available_commands()
         elif message.message.lower() in ['status', 'system']:
             response = current_workflow.get_system_status()
+        elif message.message.lower() == 'rebuild':
+            response = current_workflow.rebuild_rag_index()
         else:
-            response = current_workflow.process_query(message.message)
+            # PERFORMANCE OPTIMIZED: Use async query processing to avoid blocking
+            response = await current_workflow.process_query_async(message.message)
         
         return ChatResponse(
             response=response,

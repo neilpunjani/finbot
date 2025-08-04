@@ -5,6 +5,8 @@ from typing import Dict, List, Any, Optional, Tuple
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dataclasses import dataclass
 import pickle
 from pathlib import Path
@@ -19,12 +21,14 @@ class DataSourceSchema:
     """Schema information for a data source"""
     source_name: str
     file_path: str
+    file_type: str  # 'csv', 'xlsx', 'pdf', etc.
     sheet_name: Optional[str] = None
     columns: List[str] = None
     sample_values: Dict[str, List] = None
     data_types: Dict[str, str] = None
     row_count: int = 0
     domain_info: Dict[str, Any] = None
+    content_preview: Optional[str] = None  # For PDFs and documents
 
 @dataclass
 class SourceCandidate:
@@ -84,6 +88,17 @@ class RAGDataIndexer:
                     "training_hours": ["employee", "hours", "training_type"],
                     "certification_rate": ["certified", "total_employees"]
                 }
+            },
+            # Policy/Document patterns
+            "policy": {
+                "keywords": ["policy", "procedure", "compliance", "regulation", "standard", "guideline", "protocol", "requirement"],
+                "structures": ["document", "regulatory"],
+                "expertise": "policy_analyst",
+                "document_types": {
+                    "safety": ["safety", "health", "ppe", "training", "hazard", "incident", "emergency"],
+                    "environmental": ["environmental", "water", "air", "waste", "emission", "biodiversity", "sustainability"],
+                    "operational": ["equipment", "maintenance", "drilling", "blasting", "contractor", "shift"]
+                }
             }
         }
     
@@ -110,6 +125,17 @@ class RAGDataIndexer:
                 csv_docs, csv_schemas = self._index_csv_file(csv_path)
                 documents.extend(csv_docs)
                 schemas.update(csv_schemas)
+        
+        # Index PDF files
+        pdf_dir = os.getenv("PDF_DIRECTORY", "data/pdf")
+        if os.path.exists(pdf_dir):
+            pdf_files = [f for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
+            print(f"📄 Found {len(pdf_files)} PDF files to index")
+            for pdf_file in pdf_files:
+                pdf_path = os.path.join(pdf_dir, pdf_file)
+                pdf_docs, pdf_schemas = self._index_pdf_file(pdf_path)
+                documents.extend(pdf_docs)
+                schemas.update(pdf_schemas)
         
         # Create vector store
         if documents:
@@ -232,6 +258,69 @@ class RAGDataIndexer:
         
         return documents, schemas
     
+    def _index_pdf_file(self, pdf_path: str) -> Tuple[List[Document], Dict[str, DataSourceSchema]]:
+        """Index a PDF file for vector search"""
+        
+        documents = []
+        schemas = {}
+        
+        try:
+            file_name = os.path.basename(pdf_path).replace('.pdf', '')
+            
+            # Load and split PDF
+            loader = PyPDFLoader(pdf_path)
+            pages = loader.load()
+            
+            # Split into chunks for better retrieval
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+            )
+            doc_chunks = text_splitter.split_documents(pages)
+            
+            # Get full text for analysis
+            full_text = " ".join([page.page_content for page in pages])
+            content_preview = full_text[:500] + "..." if len(full_text) > 500 else full_text
+            
+            # Create schema for the PDF
+            schema = self._create_pdf_schema(pdf_path, full_text, content_preview)
+            schema_key = f"pdf_{file_name}"
+            schemas[schema_key] = schema
+            
+            # Create documents for each chunk
+            for i, chunk in enumerate(doc_chunks):
+                doc = Document(
+                    page_content=chunk.page_content,
+                    metadata={
+                        "source_type": "pdf",
+                        "file_path": pdf_path,
+                        "schema_key": schema_key,
+                        "chunk_id": i,
+                        "total_chunks": len(doc_chunks)
+                    }
+                )
+                documents.append(doc)
+            
+            # Also create a main document with schema info for discovery
+            schema_content = self._create_pdf_document_content(schema)
+            main_doc = Document(
+                page_content=schema_content,
+                metadata={
+                    "source_type": "pdf_schema",
+                    "file_path": pdf_path,
+                    "schema_key": schema_key
+                }
+            )
+            documents.append(main_doc)
+            
+            print(f"   📄 Indexed PDF: {file_name} ({len(doc_chunks)} chunks, {len(pages)} pages)")
+            
+        except Exception as e:
+            print(f"❌ Failed to index PDF file {pdf_path}: {str(e)}")
+        
+        return documents, schemas
+    
     def _create_schema(self, file_path: str, sheet_name: Optional[str], df: pd.DataFrame) -> DataSourceSchema:
         """Create schema information for a data source"""
         
@@ -260,9 +349,14 @@ class RAGDataIndexer:
         # Detect domain type
         domain_info = self._analyze_domain(columns, sample_values, sheet_name)
         
+        # Determine file type
+        file_extension = os.path.splitext(file_path)[1].lower()
+        file_type = "xlsx" if file_extension in [".xlsx", ".xls"] else "csv"
+        
         return DataSourceSchema(
             source_name=sheet_name or os.path.basename(file_path),
             file_path=file_path,
+            file_type=file_type,
             sheet_name=sheet_name,
             columns=columns,
             sample_values=sample_values,
@@ -345,6 +439,122 @@ class RAGDataIndexer:
         
         return '\n'.join(content_parts)
     
+    def _create_pdf_schema(self, pdf_path: str, full_text: str, content_preview: str) -> DataSourceSchema:
+        """Create schema information for a PDF document"""
+        
+        file_name = os.path.basename(pdf_path).replace('.pdf', '')
+        
+        # Analyze document domain based on content
+        domain_info = self._analyze_pdf_domain(full_text, file_name)
+        
+        # Extract key topics/sections for better searchability
+        key_topics = self._extract_pdf_topics(full_text)
+        
+        return DataSourceSchema(
+            source_name=file_name,
+            file_path=pdf_path,
+            file_type="pdf",
+            columns=key_topics,  # Use topics as "columns" for consistency
+            sample_values={},
+            data_types={},
+            row_count=len(full_text.split()),  # Word count as proxy for size
+            domain_info=domain_info,
+            content_preview=content_preview
+        )
+    
+    def _analyze_pdf_domain(self, text: str, filename: str) -> Dict[str, Any]:
+        """Analyze PDF domain based on content and filename"""
+        
+        text_lower = text.lower()
+        filename_lower = filename.lower()
+        combined_text = f"{text_lower} {filename_lower}"
+        
+        # Enhanced domain scoring for PDFs
+        domain_scores = {}
+        for domain, info in self.domain_knowledge.items():
+            score = 0
+            
+            # Score based on keywords
+            for keyword in info['keywords']:
+                score += combined_text.count(keyword) * 2  # Weight content more
+            
+            # Special scoring for policy domain
+            if domain == "policy" and 'document_types' in info:
+                for doc_type, type_keywords in info['document_types'].items():
+                    for keyword in type_keywords:
+                        if keyword in combined_text:
+                            score += 3  # High weight for policy-specific terms
+            
+            domain_scores[domain] = score
+        
+        # Get best domain
+        best_domain = max(domain_scores, key=domain_scores.get) if domain_scores else "policy"
+        
+        return {
+            "domain_type": best_domain,
+            "domain_confidence": domain_scores.get(best_domain, 0),
+            "all_scores": domain_scores,
+            "expertise_needed": self.domain_knowledge.get(best_domain, {}).get("expertise", "policy_analyst"),
+            "structure_type": "document",
+            "document_category": self._categorize_pdf_document(text_lower, filename_lower)
+        }
+    
+    def _categorize_pdf_document(self, text: str, filename: str) -> str:
+        """Categorize the type of PDF document"""
+        
+        combined = f"{text} {filename}"
+        
+        if any(term in combined for term in ["safety", "health", "ppe", "hazard", "incident", "emergency"]):
+            return "safety_policy"
+        elif any(term in combined for term in ["environmental", "sustainability", "emission", "water", "waste"]):
+            return "environmental_policy"  
+        elif any(term in combined for term in ["operational", "equipment", "maintenance", "drilling", "contractor"]):
+            return "operational_policy"
+        else:
+            return "general_policy"
+    
+    def _extract_pdf_topics(self, text: str) -> List[str]:
+        """Extract key topics from PDF content for searchability"""
+        
+        # Split into sections/sentences and extract key terms
+        topics = []
+        
+        # Look for section headers (numbers followed by text)
+        import re
+        sections = re.findall(r'\d+\.\s*\*?\*?([^*\n]+)', text)
+        topics.extend([section.strip().replace('*', '') for section in sections[:10]])
+        
+        # Add key terms based on document type
+        text_lower = text.lower()
+        key_terms = []
+        
+        if "safety" in text_lower:
+            key_terms.extend(["Worker Training", "PPE", "Hazard Assessment", "Incident Reporting", "Emergency Response"])
+        if "environmental" in text_lower:
+            key_terms.extend(["Water Management", "Air Quality", "Waste Management", "Biodiversity", "Climate Impact"])
+        if "operational" in text_lower or "equipment" in text_lower:
+            key_terms.extend(["Equipment Maintenance", "Drilling Procedures", "Contractor Management", "Technology Integration"])
+        
+        topics.extend(key_terms)
+        
+        # Remove duplicates and limit
+        return list(dict.fromkeys(topics))[:15]
+    
+    def _create_pdf_document_content(self, schema: DataSourceSchema) -> str:
+        """Create searchable content for PDF schema"""
+        
+        content_parts = [
+            f"Document: {schema.source_name}",
+            f"Type: PDF Policy Document",
+            f"Category: {schema.domain_info.get('document_category', 'policy')}",
+            f"Topics: {' '.join(schema.columns)}",  # Key topics
+        ]
+        
+        if schema.content_preview:
+            content_parts.append(f"Content Preview: {schema.content_preview}")
+        
+        return '\n'.join(content_parts)
+    
     def _save_schemas(self) -> None:
         """Save schemas to disk"""
         schema_file = os.path.join(self.index_path, "schemas.pkl")
@@ -396,32 +606,18 @@ class RAGSourceSelector:
         # Build schema context for LLM
         schema_context = self._build_schema_context(candidates)
         
-        prompt = f"""You are a data analyst. Your job is to select the ONE source that can answer this query.
+        prompt = f"""You are a data analyst. Select the best data source to answer this query.
 
 QUERY: {query}
 
 AVAILABLE SOURCES:
 {schema_context}
 
-INSTRUCTIONS:
-1. Read the query carefully
-2. Determine what EXACT data is needed to answer it
-3. Check which source has that EXACT data
-4. If NO source has the required data, say "NO MATCH"
-
-EXAMPLES:
-- Query "cash ratio" needs: Cash + Current Liabilities data
-- Query "revenue for Ontario" needs: Revenue data + Ontario geographic data  
-- Query "training hours for gold" needs: Training data + Gold/commodity data
-
-BE STRICT:
-- If query asks for "cash ratio" but no source has cash/liability data → NO MATCH
-- If query asks for "Ontario revenue" but no source has Ontario data → NO MATCH
-- If query asks for calculation but source lacks required columns → NO MATCH
+Choose the source most likely to contain relevant data for this query. Consider all available columns and data types.
 
 RESPONSE FORMAT:
-Best source: [SOURCE_NAME] or NO MATCH
-Reason: [Why this source has the exact data needed, or why no source matches]
+Best source: [SOURCE_NAME]
+Reason: [Brief explanation]
 
 RESPONSE:"""
 
@@ -429,10 +625,7 @@ RESPONSE:"""
             response = self.llm.invoke(prompt).content
             print(f"   🧠 LLM Decision: {response}")
             
-            # Check for NO MATCH
-            if "NO MATCH" in response.upper():
-                print("   ❌ LLM determined no source has the required data")
-                return None
+            # Parse the LLM response to select the best source
             
             selected_candidate = self._parse_selection_response(response, candidates)
             
@@ -521,10 +714,14 @@ class RAGDiscoveryAgent:
         self.indexer = RAGDataIndexer()
         self.selector = RAGSourceSelector()
         
-        # Speed optimization components
-        self.classification_cache = {}  # Cache for LLM classifications
+        # Speed optimization components with PERSISTENT CACHING
+        self.classification_cache = {}  # Memory cache for LLM classifications
+        self.classification_cache_file = "data_index/classification_cache.json"  # Persistent cache file
         self.executor = None  # Will be created per request to avoid shutdown issues
         self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))  # Reuse LLM instance
+        
+        # Load persistent classification cache
+        self._load_persistent_classification_cache()
         
         # Load or build index
         if not rebuild_index and self.indexer.load_existing_index():
@@ -690,8 +887,11 @@ Respond with exactly one word: FINANCIAL or OPERATIONAL"""
         # Not cached, perform LLM classification
         result = self._is_financial_query(query)
         
-        # Cache the result
+        # Cache the result in memory
         self.classification_cache[cache_key] = result
+        
+        # PERFORMANCE OPTIMIZATION: Save to persistent cache immediately
+        self._save_persistent_classification_cache()
         
         # Limit cache size to prevent memory growth
         if len(self.classification_cache) > 100:
@@ -701,11 +901,37 @@ Respond with exactly one word: FINANCIAL or OPERATIONAL"""
         
         return result
     
-    def _vector_search_parallel(self, query: str, top_k: int) -> Optional[List]:
-        """Parallel-optimized vector search"""
+    def _load_persistent_classification_cache(self):
+        """Load classification cache from disk for persistence across sessions (PERFORMANCE OPTIMIZATION)"""
         try:
-            docs = self.indexer.vector_store.similarity_search_with_score(query, k=top_k * 3)
-            print(f"   📊 Found {len(docs)} potential sources from vector search")
+            if os.path.exists(self.classification_cache_file):
+                with open(self.classification_cache_file, 'r') as f:
+                    persistent_cache = json.load(f)
+                    self.classification_cache.update(persistent_cache)
+                    print(f"   💾 Loaded {len(persistent_cache)} cached classifications from disk")
+            else:
+                print("   📄 No persistent classification cache found - starting fresh")
+        except Exception as e:
+            print(f"   ❌ Failed to load persistent classification cache: {str(e)}")
+    
+    def _save_persistent_classification_cache(self):
+        """Save classification cache to disk for persistence (PERFORMANCE OPTIMIZATION)"""
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.classification_cache_file), exist_ok=True)
+            
+            with open(self.classification_cache_file, 'w') as f:
+                json.dump(self.classification_cache, f, indent=2)
+                print(f"   💾 Saved {len(self.classification_cache)} classifications to persistent cache")
+        except Exception as e:
+            print(f"   ❌ Failed to save persistent classification cache: {str(e)}")
+    
+    def _vector_search_parallel(self, query: str, top_k: int) -> Optional[List]:
+        """Parallel-optimized vector search (PERFORMANCE OPTIMIZED: no over-fetching)"""
+        try:
+            # PERFORMANCE FIX: Fetch exactly what we need instead of 3x over-fetching
+            docs = self.indexer.vector_store.similarity_search_with_score(query, k=top_k)
+            print(f"   📊 Found {len(docs)} sources from optimized vector search (no over-fetch)")
             return docs
         except Exception as e:
             print(f"❌ Vector search failed: {str(e)}")

@@ -1,38 +1,43 @@
 import os
 import pandas as pd
+import time
 from typing import Dict, Any, Optional
 from langchain_openai import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 
 from .rag_discovery_agent import RAGDiscoveryAgent, SourceCandidate
+from .pdf_document_agent import PDFDocumentAgent
 
 
-class RAGEnhancedExcelAgent:
-    """Enhanced Excel agent that works with RAG-discovered sources"""
+class DataFrameCacheManager:
+    """Shared DataFrame cache manager with optimized timestamp checking"""
     
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o-mini",  # Using faster model for pandas analysis
-            temperature=0.1,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        # Caching system
         self._dataframe_cache = {}  # Store DataFrames in memory
         self._file_timestamps = {}  # Track when files were last modified
+        self._last_timestamp_check = {}  # Track when we last checked file timestamps (performance optimization)
     
-    def _get_cached_dataframe(self, file_path: str, sheet_name: str = None) -> pd.DataFrame:
-        """Get DataFrame from cache or load fresh if file was modified"""
+    def get_cached_dataframe(self, file_path: str, sheet_name: str = None) -> pd.DataFrame:
+        """Get DataFrame from cache or load fresh if file was modified (optimized with smart timestamp checking)"""
         
         cache_key = f"{file_path}:{sheet_name or 'default'}"
         
         try:
-            # Check when the file was last modified
-            current_mtime = os.path.getmtime(file_path)
+            # PERFORMANCE OPTIMIZATION: Only check file modification time every 5 seconds to avoid excessive I/O
+            current_time = time.time()
+            last_check = self._last_timestamp_check.get(cache_key, 0)
+            
+            # If we haven't checked the timestamp recently, check it now
+            if current_time - last_check > 5.0:  # Check at most every 5 seconds
+                current_mtime = os.path.getmtime(file_path)
+                self._file_timestamps[cache_key] = current_mtime
+                self._last_timestamp_check[cache_key] = current_time
+            
             cached_mtime = self._file_timestamps.get(cache_key, 0)
             
             # Load fresh data if file is new or was modified
-            if cache_key not in self._dataframe_cache or current_mtime > cached_mtime:
+            if cache_key not in self._dataframe_cache or cached_mtime > self._file_timestamps.get(f"{cache_key}_loaded", 0):
                 print(f"   📁 Loading fresh data from {os.path.basename(file_path)} (file modified or first load)")
                 
                 if sheet_name:
@@ -42,9 +47,9 @@ class RAGEnhancedExcelAgent:
                     df = pd.read_csv(file_path)
                     data_context = f"CSV file '{os.path.basename(file_path)}'"
                 
-                # Cache the DataFrame and timestamp
+                # Cache the DataFrame and mark when it was loaded
                 self._dataframe_cache[cache_key] = df
-                self._file_timestamps[cache_key] = current_mtime
+                self._file_timestamps[f"{cache_key}_loaded"] = cached_mtime
                 
                 print(f"   💾 Cached {data_context}: {df.shape[0]} rows, {df.shape[1]} columns")
             else:
@@ -64,7 +69,33 @@ class RAGEnhancedExcelAgent:
         """Manually clear the DataFrame cache"""
         self._dataframe_cache.clear()
         self._file_timestamps.clear()
+        self._last_timestamp_check.clear()
         print("   🔄 DataFrame cache cleared")
+
+
+# Shared cache manager instance
+_shared_cache_manager = DataFrameCacheManager()
+
+
+class RAGEnhancedExcelAgent:
+    """Enhanced Excel agent that works with RAG-discovered sources"""
+    
+    def __init__(self):
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini",  # Using faster model for pandas analysis
+            temperature=0.1,
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
+        # Use shared cache manager for performance
+        self.cache_manager = _shared_cache_manager
+    
+    def _get_cached_dataframe(self, file_path: str, sheet_name: str = None) -> pd.DataFrame:
+        """Get DataFrame from cache or load fresh if file was modified (uses shared optimized cache)"""
+        return self.cache_manager.get_cached_dataframe(file_path, sheet_name)
+    
+    def clear_cache(self):
+        """Manually clear the DataFrame cache"""
+        self.cache_manager.clear_cache()
     
     def analyze(self, source_candidate: SourceCandidate, query: str, expertise: str = None) -> str:
         """Analyze using pre-selected source with domain expertise"""
@@ -96,31 +127,8 @@ class RAGEnhancedExcelAgent:
             # Create pandas agent with expert context and DEBUG ENABLED
             print(f"   🤖 Creating pandas agent with enhanced configuration...")
             
-            # Add explicit constraint against sampling
-            full_prompt = f"""{expert_prompt}
-
-**CRITICAL**: The data is ALREADY LOADED in the DataFrame variable 'df'. 
-
-**CRITICAL IMPORT REQUIREMENT**: ALWAYS start your code with these imports:
-```python
-import pandas as pd
-import numpy as np
-from datetime import datetime
-```
-
-**FORBIDDEN OPERATIONS**:
-- Do NOT use pd.read_csv(), pd.read_excel(), or any file reading functions
-- Do NOT try to read 'VW_PBI.csv' or any other file - THE DATA IS ALREADY LOADED
-- Do NOT use df.head(), df.tail(), df.sample() 
-- Do NOT limit rows with [:10], [:100], etc.
-- Do NOT use .iloc[:n] to limit data
-
-**MANDATORY**: 
-- Work DIRECTLY with the variable 'df' - it contains {df.shape[0]:,} rows of loaded data
-- The DataFrame 'df' IS the VW_PBI sheet data - use it directly
-- Start your analysis with df.info(), df.columns, df.shape to understand the data
-
-**REMEMBER**: You have {df.shape[0]:,} rows of data already loaded in 'df' - use ALL of them!"""
+            # Create pandas agent with expert context
+            full_prompt = expert_prompt
             
             agent = create_pandas_dataframe_agent(
                 self.llm,
@@ -128,7 +136,7 @@ from datetime import datetime
                 agent_type=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,  # Enable verbose to see what's happening
                 prefix=full_prompt,
-                max_iterations=5,  # Balanced speed vs completion - allows finishing analysis
+                max_iterations=7,  # Balanced for performance and completion
                 # early_stopping_method="generate",  # Removed - unsupported in current LangChain version
                 allow_dangerous_code=True,  # Allow code execution for data analysis
                 # return_intermediate_steps=True  # Removed to fix API compatibility
@@ -232,6 +240,9 @@ from datetime import datetime
 5. **VERIFY**: Cross-check calculated values against any direct line items if both exist
 
 **MANDATORY**: For any ratio, identify and include ALL components, not just partial amounts.
+
+**NET INCOME CALCULATION**: When asked for Net Income, CALCULATE it from components (Revenue - Expenses - Interest - Tax) rather than just looking for a "Net Income" line item. Show both the calculation breakdown and final result.
+
 THE DATA IS ALREADY LOADED - do not try to read any files"""
             
         elif domain_type == "mining":
@@ -320,41 +331,16 @@ class RAGEnhancedCSVAgent:
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
-        # Caching system (same as Excel agent)
-        self._dataframe_cache = {}
-        self._file_timestamps = {}
+        # Use shared cache manager for performance
+        self.cache_manager = _shared_cache_manager
     
     def _get_cached_dataframe(self, file_path: str) -> pd.DataFrame:
-        """Get CSV DataFrame from cache or load fresh if file was modified"""
-        
-        cache_key = f"{file_path}:csv"
-        
-        try:
-            current_mtime = os.path.getmtime(file_path)
-            cached_mtime = self._file_timestamps.get(cache_key, 0)
-            
-            if cache_key not in self._dataframe_cache or current_mtime > cached_mtime:
-                print(f"   📁 Loading fresh CSV data from {os.path.basename(file_path)}")
-                df = pd.read_csv(file_path)
-                
-                self._dataframe_cache[cache_key] = df
-                self._file_timestamps[cache_key] = current_mtime
-                
-                print(f"   💾 Cached CSV: {df.shape[0]} rows, {df.shape[1]} columns")
-            else:
-                print(f"   ⚡ Using cached CSV data for {os.path.basename(file_path)}")
-            
-            return self._dataframe_cache[cache_key]
-            
-        except Exception as e:
-            print(f"   ❌ CSV cache error: {str(e)}")
-            return pd.read_csv(file_path)
+        """Get CSV DataFrame from cache or load fresh if file was modified (uses shared optimized cache)"""
+        return self.cache_manager.get_cached_dataframe(file_path, None)  # None for CSV (no sheet name)
     
     def clear_cache(self):
         """Manually clear the CSV DataFrame cache"""
-        self._dataframe_cache.clear()
-        self._file_timestamps.clear()
-        print("   🔄 CSV DataFrame cache cleared")
+        self.cache_manager.clear_cache()
     
     def analyze(self, source_candidate: SourceCandidate, query: str, expertise: str = None) -> str:
         """Analyze CSV source with domain expertise"""
@@ -380,30 +366,8 @@ class RAGEnhancedCSVAgent:
             # Create pandas agent with expert context and DEBUG ENABLED
             print(f"   🤖 Creating CSV pandas agent...")
             
-            # Add explicit DataFrame constraint for CSV agent
-            full_csv_prompt = f"""{expert_prompt}
-
-**CRITICAL**: The CSV data is ALREADY LOADED in the DataFrame variable 'df'. 
-
-**CRITICAL IMPORT REQUIREMENT**: ALWAYS start your code with these imports:
-```python
-import pandas as pd
-import numpy as np
-from datetime import datetime
-```
-
-**FORBIDDEN OPERATIONS**:
-- Do NOT use pd.read_csv(), pd.read_excel(), or any file reading functions
-- Do NOT try to read 'hr_data.csv', 'WorkforceData.csv', or any other file - THE DATA IS ALREADY LOADED
-- Do NOT use df.head(), df.tail(), df.sample() 
-- Do NOT limit rows with [:10], [:100], etc.
-
-**MANDATORY**: 
-- Work DIRECTLY with the variable 'df' - it contains {df.shape[0]:,} rows of loaded CSV data
-- The DataFrame 'df' IS the {schema.source_name} data - use it directly
-- Start your analysis with df.info(), df.columns, df.shape to understand the data
-
-**REMEMBER**: You have {df.shape[0]:,} rows of data already loaded in 'df' - use ALL of them!"""
+            # Create CSV pandas agent with expert context
+            full_csv_prompt = expert_prompt
             
             agent = create_pandas_dataframe_agent(
                 self.llm,
@@ -411,7 +375,7 @@ from datetime import datetime
                 agent_type=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,  # Enable verbose to see what's happening
                 prefix=full_csv_prompt,
-                max_iterations=5,  # Balanced speed vs completion - allows finishing analysis
+                max_iterations=7,  # Balanced for performance and completion
                 # early_stopping_method="generate",  # Removed - unsupported in current LangChain version
                 allow_dangerous_code=True,  # Allow code execution for data analysis
                 # return_intermediate_steps=True  # Removed to fix API compatibility
@@ -523,6 +487,7 @@ class RAGEnhancedWorkflow:
         self.loading_status = "Preparing AI agents..."
         self.excel_agent = RAGEnhancedExcelAgent()
         self.csv_agent = RAGEnhancedCSVAgent()
+        self.pdf_agent = PDFDocumentAgent(vector_store=self.rag_discovery.indexer.vector_store)
         
         # Preload common data sources at startup
         self.loading_status = "Preloading data sources..."
@@ -548,9 +513,8 @@ class RAGEnhancedWorkflow:
             if not source_candidate:
                 return "❌ **No Data Source Found**\n\nThe system could not find any data source that contains the required information to answer your query. The available sources do not have the necessary data elements for this calculation/analysis.\n\n**Suggestion**: Try rephrasing your query or check if the required data exists in your data sources."
             
-            # PHASE 2: Use Simple Domain-Based Expertise (No LLM call needed)
-            domain_type = source_candidate.schema.domain_info.get('domain_type', 'unknown')
-            expertise = self._get_simple_expertise(domain_type)
+            # PHASE 2: Generate Domain-Based Expertise (restore original functionality)
+            expertise = source_candidate.schema.domain_info.get('expertise_needed', 'financial_analyst')
             print(f"   👨‍💼 Using expertise: {expertise}")
             
             # PHASE 3: Expert Analysis with Selected Source
@@ -563,14 +527,20 @@ class RAGEnhancedWorkflow:
             print(f"      Sheet name: {schema.sheet_name}")
             print(f"      File extension: {schema.file_path.split('.')[-1]}")
             
-            if schema.file_path.endswith('.xlsx'):
+            # Dynamic file-type based routing
+            file_extension = schema.file_path.split('.')[-1].lower()
+            
+            if file_extension == 'xlsx':
                 print(f"   📊 Routing to EXCEL agent for .xlsx file")
                 result = self.excel_agent.analyze(source_candidate, query, expertise)
-            elif schema.file_path.endswith('.csv'):
+            elif file_extension == 'csv':
                 print(f"   📄 Routing to CSV agent for .csv file") 
                 result = self.csv_agent.analyze(source_candidate, query, expertise)
+            elif file_extension == 'pdf':
+                print(f"   📋 Routing to PDF agent for .pdf file")
+                result = self.pdf_agent.query(query)
             else:
-                return f"❌ Unsupported file type: {schema.file_path}"
+                return f"❌ Unsupported file type: {file_extension}. Supported types: xlsx, csv, pdf"
             
             return result
             
@@ -584,10 +554,10 @@ class RAGEnhancedWorkflow:
         
         return f"""🎯 **RAG-Enhanced Agentic Workflow**
 
-**System Type**: Vector RAG Discovery → Schema-Aware Selection → Expert Analysis
+**System Type**: Vector RAG Discovery → File-Type Routing → Expert Analysis
 **Discovery Model**: text-embedding-ada-002 (Vector Search)
 **Selection Model**: GPT-4o-mini (Schema Reasoning) 
-**Analysis Model**: GPT-4o (Expert Analysis)
+**Analysis Model**: GPT-4o-mini (Fast Analysis)
 
 **Performance**:
 - Discovery Phase: ~100-500ms (vs previous 10-20 seconds)
@@ -596,11 +566,12 @@ class RAGEnhancedWorkflow:
 
 **Capabilities**:
 ✅ Fast semantic source discovery
-✅ Schema-aware intelligent selection  
+✅ Dynamic file-type based routing (Excel/CSV/PDF)
 ✅ Domain expertise generation
 ✅ Complex calculation support
 ✅ Hierarchical data handling (Level1/Level2/Level3)
-✅ Multi-domain analysis (Financial, Mining, HR)
+✅ Multi-domain analysis (Financial, Mining, HR, Policy)
+✅ PDF document analysis and policy querying
 
 **Data Sources Available**: {schema_count} sources indexed and ready for analysis"""
     
@@ -626,6 +597,12 @@ class RAGEnhancedWorkflow:
 • "Show certification rates by department"
 • "Calculate training hours per employee for gold operations"
 
+**Policy/Document Examples**:
+• "What are the safety protocols for mining operations?"
+• "Show me environmental compliance requirements"
+• "What are best practices for equipment usage?"
+• "Find procedures for hazardous material handling"
+
 **System Commands**:
 • 'status' - Show system status and indexed sources
 • 'help' - Show this help message
@@ -633,9 +610,9 @@ class RAGEnhancedWorkflow:
 
 **How it works**:
 1. 🔍 **RAG Discovery**: Finds relevant sources in ~100ms using vector search
-2. 🧠 **Smart Selection**: LLM picks best source based on schema and calculation needs  
-3. 🎯 **Expert Analysis**: Domain-specific agent performs complex calculations
-4. ✅ **Quality Results**: Preserves all current calculation capabilities with 20x speed improvement"""
+2. 🎯 **File-Type Routing**: Routes to appropriate agent (Excel/CSV/PDF) based on source type
+3. 🧠 **Expert Analysis**: Domain-specific agent performs calculations or document analysis
+4. ✅ **Scalable Results**: Handles any data source type without code changes"""
     
     def _get_simple_expertise(self, domain_type: str) -> str:
         """Get simple domain-based expertise without LLM call"""

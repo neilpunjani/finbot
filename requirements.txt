@@ -18,3 +18,4 @@ psycopg2-binary>=2.9.7
 pymysql>=1.1.0
 fastapi>=0.104.1
 uvicorn>=0.24.0
+pypdf>=4.0.0
