@@ -9,6 +9,10 @@ from dataclasses import dataclass
 import pickle
 from pathlib import Path
 import hashlib
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
+import time
 
 @dataclass
 class DataSourceSchema:
@@ -517,6 +521,11 @@ class RAGDiscoveryAgent:
         self.indexer = RAGDataIndexer()
         self.selector = RAGSourceSelector()
         
+        # Speed optimization components
+        self.classification_cache = {}  # Cache for LLM classifications
+        self.executor = None  # Will be created per request to avoid shutdown issues
+        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))  # Reuse LLM instance
+        
         # Load or build index
         if not rebuild_index and self.indexer.load_existing_index():
             print("✅ RAG Discovery Agent ready (using existing index)")
@@ -526,73 +535,71 @@ class RAGDiscoveryAgent:
             print("✅ RAG Discovery Agent ready (new index built)")
     
     def discover_best_source(self, query: str, top_k: int = 5) -> Optional[SourceCandidate]:
-        """Main discovery method - Financial queries → VW_PBI, Others → RAG"""
+        """Main discovery method with parallel processing optimizations and fallback"""
         
         if not self.indexer.vector_store:
             print("❌ No vector store available")
             return None
         
         print(f"🔍 RAG Discovery: {query}")
+        start_time = time.time()
         
-        # Step 1: Check if this is a financial query
-        if self._is_financial_query(query):
-            print("   💰 Financial query detected → Selecting VW_PBI")
-            return self._get_vw_pbi_source()
-        
-        # Step 2: For non-financial queries, use RAG
-        print("   🔍 Operational query → Using RAG search")
         try:
-            docs = self.indexer.vector_store.similarity_search_with_score(query, k=top_k * 3)
-            print(f"   📊 Found {len(docs)} potential sources from vector search")
+            # Try parallel processing first
+            return self._discover_parallel(query, top_k, start_time)
         except Exception as e:
-            print(f"❌ Vector search failed: {str(e)}")
-            return None
-        
-        # Step 2: Get top 5 unique sources - SIMPLE
-        candidates = []
-        seen_source_names = set()
-        
-        print(f"   📋 Top 5 unique sources:")
-        
-        for doc, score in docs:
-            if len(candidates) >= 5:  # Stop at 5
-                break
-                
-            schema_key = doc.metadata.get('schema_key')
-            if schema_key not in self.indexer.schema_store:
-                continue
-                
-            schema = self.indexer.schema_store[schema_key]
+            print(f"   ⚠️ Parallel processing failed: {e}, falling back to sequential")
+            return self._discover_sequential(query, top_k, start_time)
+    
+    def _discover_parallel(self, query: str, top_k: int, start_time: float) -> Optional[SourceCandidate]:
+        """Parallel discovery implementation"""
+        # Parallel execution: Classification + Vector Search simultaneously
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit both tasks concurrently
+            classification_future = executor.submit(self._is_financial_query_cached, query)
+            vector_search_future = executor.submit(self._vector_search_parallel, query, top_k)
             
-            # Skip if we already have this source name
-            if schema.source_name in seen_source_names:
-                continue
-                
-            seen_source_names.add(schema.source_name)
+            # Get classification result (should be fast with caching)
+            is_financial = classification_future.result(timeout=10)  # 10 second timeout
             
-            print(f"      {len(candidates)+1}. {schema.source_name} (similarity: {1.0 - score:.3f})")
-            print(f"         Columns: {', '.join(schema.columns[:5])}{'...' if len(schema.columns) > 5 else ''}")
-            
-            candidate = SourceCandidate(
-                schema=schema,
-                relevance_score=1.0 - score,
-                reason=f"Vector similarity: {1.0 - score:.3f}"
-            )
-            candidates.append(candidate)
+            if is_financial:
+                print("   💰 Financial query detected → Selecting VW_PBI")
+                try:
+                    vector_search_future.cancel()  # Cancel unneeded vector search
+                except:
+                    pass  # Ignore cancellation errors
+                result = self._get_vw_pbi_source()
+            else:
+                print("   🔍 Operational query → Using RAG search")
+                docs = vector_search_future.result(timeout=15)  # 15 second timeout
+                if not docs:
+                    print("❌ Vector search failed")
+                    return None
+                result = self._process_search_results(docs, top_k, query)
         
-        if not candidates:
-            print("❌ No valid candidates found")
-            return None
+        elapsed = time.time() - start_time
+        print(f"   ⚡ Parallel discovery completed in {elapsed:.2f}s")
+        return result
+    
+    def _discover_sequential(self, query: str, top_k: int, start_time: float) -> Optional[SourceCandidate]:
+        """Sequential discovery fallback"""
+        # Step 1: Check if this is a financial query
+        is_financial = self._is_financial_query_cached(query)
         
-        # Step 3: LLM-based intelligent selection
-        print(f"   🧠 LLM selecting best from {len(candidates)} candidates...")
-        best_source = self.selector.select_best_source(query, candidates)
+        if is_financial:
+            print("   💰 Financial query detected → Selecting VW_PBI")
+            result = self._get_vw_pbi_source()
+        else:
+            print("   🔍 Operational query → Using RAG search")
+            docs = self._vector_search_parallel(query, top_k)
+            if not docs:
+                print("❌ Vector search failed")
+                return None
+            result = self._process_search_results(docs, top_k, query)
         
-        if best_source:
-            print(f"   ✅ Selected: {best_source.schema.source_name}")
-            print(f"   📋 Expertise needed: {best_source.schema.domain_info.get('expertise_needed', 'analyst')}")
-        
-        return best_source
+        elapsed = time.time() - start_time
+        print(f"   ⚡ Sequential discovery completed in {elapsed:.2f}s")
+        return result
     
     def get_schema_info(self, schema_key: str) -> Optional[DataSourceSchema]:
         """Get detailed schema information for a source"""
@@ -668,3 +675,85 @@ Respond with exactly one word: FINANCIAL or OPERATIONAL"""
         
         print("   ❌ VW_PBI not found in indexed sources")
         return None
+    
+    def _is_financial_query_cached(self, query: str) -> bool:
+        """Cached version of financial query classification"""
+        # Create cache key from normalized query
+        cache_key = hashlib.md5(query.lower().strip().encode()).hexdigest()
+        
+        if cache_key in self.classification_cache:
+            is_financial = self.classification_cache[cache_key]
+            classification_type = 'Financial' if is_financial else 'Operational'
+            print(f"   💾 Cached Classification: '{query}' → {classification_type}")
+            return is_financial
+        
+        # Not cached, perform LLM classification
+        result = self._is_financial_query(query)
+        
+        # Cache the result
+        self.classification_cache[cache_key] = result
+        
+        # Limit cache size to prevent memory growth
+        if len(self.classification_cache) > 100:
+            # Remove oldest entries (simple FIFO)
+            oldest_key = next(iter(self.classification_cache))
+            del self.classification_cache[oldest_key]
+        
+        return result
+    
+    def _vector_search_parallel(self, query: str, top_k: int) -> Optional[List]:
+        """Parallel-optimized vector search"""
+        try:
+            docs = self.indexer.vector_store.similarity_search_with_score(query, k=top_k * 3)
+            print(f"   📊 Found {len(docs)} potential sources from vector search")
+            return docs
+        except Exception as e:
+            print(f"❌ Vector search failed: {str(e)}")
+            return None
+    
+    def _process_search_results(self, docs: List, top_k: int, query: str = "") -> Optional[SourceCandidate]:
+        """Process vector search results to find best source"""
+        candidates = []
+        seen_source_names = set()
+        
+        print(f"   📋 Top {min(5, top_k)} unique sources:")
+        
+        for doc, score in docs:
+            if len(candidates) >= 5:  # Stop at 5
+                break
+                
+            schema_key = doc.metadata.get('schema_key')
+            if schema_key not in self.indexer.schema_store:
+                continue
+                
+            schema = self.indexer.schema_store[schema_key]
+            
+            # Skip if we already have this source name
+            if schema.source_name in seen_source_names:
+                continue
+                
+            seen_source_names.add(schema.source_name)
+            
+            print(f"      {len(candidates)+1}. {schema.source_name} (similarity: {1.0 - score:.3f})")
+            print(f"         Columns: {', '.join(schema.columns[:5])}{'...' if len(schema.columns) > 5 else ''}")
+            print(f"         Rows: {schema.row_count:,}")
+            
+            candidates.append(SourceCandidate(
+                schema=schema,
+                relevance_score=1.0 - score,  # Convert distance to similarity
+                reason=f"Vector similarity: {1.0 - score:.3f}"
+            ))
+        
+        if not candidates:
+            print("   ❌ No suitable sources found")
+            return None
+        
+        # Use selector to pick best candidate
+        print(f"   🎯 Using RAG selector to choose from {len(candidates)} candidates...")
+        best_source = self.selector.select_best_source(query, candidates)
+        
+        if best_source:
+            print(f"   📋 Selected: {best_source.schema.source_name}")
+            print(f"   📋 Expertise needed: {best_source.schema.domain_info.get('expertise_needed', 'analyst')}")
+        
+        return best_source
