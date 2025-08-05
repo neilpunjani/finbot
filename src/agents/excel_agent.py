@@ -12,7 +12,6 @@ class ExcelAgent:
     def __init__(self):
         # Use shared fast analysis LLM for Excel processing
         self.llm = LLMPool.get_fast_analysis_llm()
-        )
         
         excel_file_path = os.getenv("EXCEL_FILE_PATH")
         if not excel_file_path or not os.path.exists(excel_file_path):
