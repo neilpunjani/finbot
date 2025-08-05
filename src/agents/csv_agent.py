@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from langchain_openai import ChatOpenAI
+from ..utils.llm_pool import LLMPool
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 from langchain.schema import HumanMessage
@@ -8,11 +9,8 @@ from typing import Dict, List, Any
 
 class CSVAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o", 
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+        # Use shared fast analysis LLM for CSV processing
+        self.llm = LLMPool.get_fast_analysis_llm()
         
         # Load multiple CSV files
         self.csv_files = {}

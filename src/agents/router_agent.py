@@ -1,15 +1,13 @@
 from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
+from ..utils.llm_pool import LLMPool
 from langchain.schema import HumanMessage
 import os
 
 class RouterAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o", 
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+        # Use shared discovery LLM for fast routing decisions
+        self.llm = LLMPool.get_discovery_llm()
         
         self.data_sources = {
             "sql": {

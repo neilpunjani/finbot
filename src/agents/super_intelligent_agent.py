@@ -7,6 +7,7 @@ No hardcoded formulas, no manual calculations - pure AI intelligence
 import os
 import pandas as pd
 from langchain_openai import ChatOpenAI
+from ..utils.llm_pool import LLMPool
 from langchain.schema import HumanMessage, SystemMessage
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
@@ -26,11 +27,8 @@ class SuperIntelligentAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+        # Use shared analysis LLM for complex reasoning (keeps GPT-4o)
+        self.llm = LLMPool.get_analysis_llm()
         
         # Discover available data sources
         self.data_sources = self._discover_data_sources()

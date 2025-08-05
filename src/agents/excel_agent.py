@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from langchain_openai import ChatOpenAI
+from ..utils.llm_pool import LLMPool
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
@@ -9,10 +10,8 @@ import json
 
 class ExcelAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o", 
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
+        # Use shared fast analysis LLM for Excel processing
+        self.llm = LLMPool.get_fast_analysis_llm()
         )
         
         excel_file_path = os.getenv("EXCEL_FILE_PATH")
