@@ -3,7 +3,7 @@ import json
 import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain.schema import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -139,11 +139,12 @@ class RAGDataIndexer:
         
         # Create vector store
         if documents:
-            self.vector_store = Chroma.from_documents(
+            self.vector_store = FAISS.from_documents(
                 documents=documents,
-                embedding=self.embeddings,
-                persist_directory=self.index_path
+                embedding=self.embeddings
             )
+            # Save FAISS index to disk
+            self.vector_store.save_local(self.index_path)
             print(f"✅ Indexed {len(documents)} data sources")
             
             # DEBUG: Show what was actually indexed
@@ -565,9 +566,10 @@ class RAGDataIndexer:
         """Load existing index if available"""
         try:
             if os.path.exists(self.index_path):
-                self.vector_store = Chroma(
-                    persist_directory=self.index_path,
-                    embedding_function=self.embeddings
+                self.vector_store = FAISS.load_local(
+                    self.index_path,
+                    self.embeddings,
+                    allow_dangerous_deserialization=True
                 )
                 
                 # Load schemas

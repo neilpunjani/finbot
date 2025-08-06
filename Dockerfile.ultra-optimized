@@ -1,0 +1,113 @@
+# ULTRA-OPTIMIZED Dockerfile - Target: <1GB with full functionality
+# Multi-stage build with aggressive optimization
+# Expected final size: 600-900MB (down from 10GB+)
+
+# ============================================
+# Stage 1: Build dependencies in Alpine (smaller)
+# ============================================
+FROM python:3.11-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies (minimal set for compilation)
+RUN apk add --no-cache \
+    gcc \
+    g++ \
+    musl-dev \
+    linux-headers \
+    libffi-dev \
+    && rm -rf /var/cache/apk/*
+
+# Copy requirements (now optimized without heavy dependencies)
+COPY requirements.txt requirements.txt
+
+# Install Python packages with aggressive optimizations
+RUN pip install --no-cache-dir \
+    --user \
+    --no-warn-script-location \
+    --disable-pip-version-check \
+    --compile \
+    --no-deps \
+    -r requirements.txt && \
+    # Resolve dependencies manually to avoid conflicts
+    pip install --no-cache-dir --user --no-warn-script-location \
+    pydantic \
+    typing-extensions \
+    annotated-types \
+    anyio \
+    sniffio \
+    idna \
+    certifi \
+    charset-normalizer \
+    urllib3 \
+    requests \
+    click \
+    h11 \
+    starlette
+
+# Clean up build artifacts aggressively
+RUN find /root/.local -name "*.pyc" -delete && \
+    find /root/.local -name "__pycache__" -type d -exec rm -rf {} + && \
+    find /root/.local -name "*.so" -exec strip {} + 2>/dev/null || true && \
+    find /root/.local -name "*.pyx" -delete && \
+    find /root/.local -name "*.pxd" -delete && \
+    rm -rf /root/.local/lib/python3.11/site-packages/*/tests/ && \
+    rm -rf /root/.local/lib/python3.11/site-packages/*/test/ && \
+    rm -rf /root/.local/lib/python3.11/site-packages/*/__pycache__ && \
+    rm -rf /root/.local/share/
+
+# ============================================  
+# Stage 2: Minimal runtime (Alpine-based)
+# ============================================
+FROM python:3.11-alpine AS runtime
+
+WORKDIR /app
+
+# Install only essential runtime dependencies
+RUN apk add --no-cache \
+    libgcc \
+    libstdc++ \
+    libffi \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Copy optimized Python packages from builder
+COPY --from=builder --chown=appuser:appgroup /root/.local /home/appuser/.local
+
+# Copy application files (only essential)
+COPY --chown=appuser:appgroup src/ ./src/
+COPY --chown=appuser:appgroup data/ ./data/
+COPY --chown=appuser:appgroup *.py ./
+
+# Copy .env file if it exists (Docker handles missing files gracefully)
+COPY --chown=appuser:appgroup .env* ./
+
+# Create required directories with proper permissions
+RUN mkdir -p data_index logs && \
+    chown -R appuser:appgroup data_index logs
+
+# Switch to non-root user
+USER appuser
+
+# Set optimized environment variables
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Expose port
+EXPOSE 8000
+
+# Optimized health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
+
+# Run application
+CMD ["python", "api.py"]

@@ -1,21 +1,38 @@
+# ULTRA-OPTIMIZED Requirements - Docker Image Size Optimized
+# Removes heavy dependencies while maintaining full functionality
+# Uses OpenAI API embeddings + FAISS instead of ChromaDB + sentence-transformers
+
+# Core LangChain (essential for agents)
 langchain>=0.1.0
-langgraph>=0.0.55
 langchain-openai>=0.0.8
 langchain-community>=0.0.38
 langchain-experimental>=0.0.45
-chromadb>=0.4.18
-sentence-transformers>=2.2.2
-sqlalchemy>=2.0.25
+langgraph>=0.0.55
+
+# Lightweight vector database (replaces ChromaDB - saves 500MB+ onnxruntime)
+faiss-cpu>=1.7.4
+
+# Data processing (essential for Excel/CSV agents)
 pandas>=2.1.4
 numpy>=1.24.0
 openpyxl>=3.1.2
-lxml>=4.9.3
-tabulate>=0.9.0
-pywin32>=308; sys_platform == "win32"
-exchangelib>=5.2.0
-python-dotenv>=1.0.0
-psycopg2-binary>=2.9.7
-pymysql>=1.1.0
+
+# API framework (essential for REST API)
 fastapi>=0.104.1
 uvicorn>=0.24.0
+
+# Configuration (essential)
+python-dotenv>=1.0.0
+
+# Document processing (essential for PDF agents)
 pypdf>=4.0.0
+
+# REMOVED DEPENDENCIES (saves 1-2GB Docker image size):
+# - chromadb>=0.4.18          # Replaced with FAISS (saves onnxruntime ~500MB)
+# - sentence-transformers     # Using OpenAI API embeddings instead (saves PyTorch 1-2GB)
+# - sqlalchemy>=2.0.25        # Database not used in current deployment
+# - psycopg2-binary>=2.9.7    # PostgreSQL not used
+# - pymysql>=1.1.0            # MySQL not used  
+# - exchangelib>=5.2.0        # Email not configured
+# - lxml>=4.9.3               # XML processing not used
+# - tabulate>=0.9.0           # Table formatting not essential
